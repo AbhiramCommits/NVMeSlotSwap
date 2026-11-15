@@ -75,6 +75,8 @@ uint64_t nvme_dev_last_activation_ns(nvme_dev_t *dev);
 int nvme_dev_save_fw_state(nvme_dev_t *dev, const char *path);
 int nvme_dev_load_fw_state(nvme_dev_t *dev, const char *path);
 
+typedef struct nvme_dev_cfg nvme_dev_cfg;
+
 #ifdef __cplusplus
 }
 #endif

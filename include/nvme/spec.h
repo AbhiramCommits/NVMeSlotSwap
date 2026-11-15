@@ -368,6 +368,15 @@ NVME_STATIC_ASSERT(sizeof(struct nvme_smart_log) == 512, "SMART log is 512 bytes
 #define NVME_SQ_ENTRY_SIZE 64u
 #define NVME_CQ_ENTRY_SIZE 16u
 
+/* Convenience typedefs so C and C++ call sites can use the same spelling. */
+typedef struct nvme_sqe nvme_sqe;
+typedef struct nvme_cqe nvme_cqe;
+typedef struct nvme_lbaf nvme_lbaf;
+typedef struct nvme_id_ctrl nvme_id_ctrl;
+typedef struct nvme_id_ns nvme_id_ns;
+typedef struct nvme_fw_slot_log nvme_fw_slot_log;
+typedef struct nvme_smart_log nvme_smart_log;
+
 #ifdef __cplusplus
 }
 #endif

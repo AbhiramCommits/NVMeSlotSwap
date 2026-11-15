@@ -80,6 +80,10 @@ void fw_mgr_revision(const struct nvme_fw_slot *slot, char out[9]);
 int fw_mgr_save(const struct fw_mgr *fw, const char *path);
 int fw_mgr_load(struct fw_mgr *fw, const char *path);
 
+typedef struct nvme_fw_image_hdr nvme_fw_image_hdr;
+typedef struct nvme_fw_slot nvme_fw_slot;
+typedef struct fw_mgr fw_mgr;
+
 #ifdef __cplusplus
 }
 #endif
