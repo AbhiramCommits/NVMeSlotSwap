@@ -72,6 +72,10 @@ target_include_directories(nvmeslotswap_core
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(nvmeslotswap_core PUBLIC Threads::Threads)
+if(UNIX AND NOT APPLE)
+    # log() for the exponential service-time model.
+    target_link_libraries(nvmeslotswap_core PUBLIC m)
+endif()
 target_compile_features(nvmeslotswap_core PUBLIC c_std_11 cxx_std_17)
 
 add_executable(nvmeslotswap src/main.cpp)

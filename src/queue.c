@@ -122,7 +122,7 @@ int nvme_qp_submit(struct nvme_qp *qp, const struct nvme_sqe *sqe, uint16_t cid)
         uint32_t done = (uint32_t)__atomic_load_n(&qp->completed, __ATOMIC_ACQUIRE);
         if ((uint16_t)(cur - done) >= qp->depth) {
             __atomic_fetch_add(&qp->stalls, 1, __ATOMIC_RELAXED);
-            return -EAGAIN;
+            return NVME_QP_EAGAIN;
         }
         if (__atomic_compare_exchange_n(&qp->sq_tail_resv, &cur, cur + 1, 0,
                                         __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {

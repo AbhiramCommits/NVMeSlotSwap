@@ -213,7 +213,7 @@ static uint64_t service_time_ns(nvme_dev_t *dev, uint32_t *rng)
 static uint8_t *dev_ptr(nvme_dev_t *dev, uint64_t iova, size_t len)
 {
     uint64_t base = NVMESS_DMA_IOVA_BASE;
-    uint64_t end = base + (uint64_t)dev->dma_used;
+    uint64_t end = base + (uint64_t)__atomic_load_n(&dev->dma_used, __ATOMIC_ACQUIRE);
     if (iova < base || iova > end || len > (size_t)(end - iova)) {
         return NULL;
     }
@@ -533,14 +533,20 @@ static struct cmd_result exec_create_sq(nvme_dev_t *dev, const struct nvme_sqe *
     return ok_result(0);
 }
 
-/* Waits for the executor to leave the queue, then clears host-visible state. */
-static void teardown_queue(nvme_dev_t *dev, struct dev_q *q)
+/* Stops the executor and waits until it can no longer touch queue state. */
+static void quiesce_queue(struct dev_q *q)
 {
     uint64_t deadline = now_ns() + 200000000ull; /* 200 ms */
     __atomic_store_n(&q->active, 0, __ATOMIC_RELEASE);
     while (__atomic_load_n(&q->in_service, __ATOMIC_ACQUIRE) != 0 && now_ns() < deadline) {
         cpu_relax();
     }
+}
+
+/* Waits for the executor to leave the queue, then clears host-visible state. */
+static void teardown_queue(nvme_dev_t *dev, struct dev_q *q)
+{
+    quiesce_queue(q);
     zero_ring_memory(dev, q);
     q->sq_iova = 0;
     q->cq_iova = 0;
@@ -559,7 +565,7 @@ static struct cmd_result exec_delete_sq(nvme_dev_t *dev, const struct nvme_sqe *
         return err_result(NVME_SC_INVALID_FIELD);
     }
     struct dev_q *q = &dev->q[qid];
-    __atomic_store_n(&q->active, 0, __ATOMIC_RELEASE);
+    quiesce_queue(q);
     q->sq_iova = 0;
     q->sq_depth = 0;
     q->sq_head = 0;
@@ -573,7 +579,7 @@ static struct cmd_result exec_delete_cq(nvme_dev_t *dev, const struct nvme_sqe *
         return err_result(NVME_SC_INVALID_FIELD);
     }
     struct dev_q *q = &dev->q[qid];
-    __atomic_store_n(&q->active, 0, __ATOMIC_RELEASE);
+    quiesce_queue(q);
     q->cq_iova = 0;
     q->cq_depth = 0;
     q->cq_tail = 0;
@@ -1247,13 +1253,14 @@ void *nvme_dev_dma_map(nvme_dev_t *dev, size_t len, uint64_t *out_iova)
         return NULL;
     }
     pthread_mutex_lock(&dev->dma_mu);
-    if (aligned > dev->dma_size || dev->dma_used > dev->dma_size - aligned) {
+    size_t used = __atomic_load_n(&dev->dma_used, __ATOMIC_ACQUIRE);
+    if (aligned > dev->dma_size || used > dev->dma_size - aligned) {
         pthread_mutex_unlock(&dev->dma_mu);
         return NULL;
     }
-    ptr = dev->dma_base + dev->dma_used;
-    *out_iova = NVMESS_DMA_IOVA_BASE + (uint64_t)dev->dma_used;
-    dev->dma_used += aligned;
+    ptr = dev->dma_base + used;
+    *out_iova = NVMESS_DMA_IOVA_BASE + (uint64_t)used;
+    __atomic_store_n(&dev->dma_used, used + aligned, __ATOMIC_RELEASE);
     pthread_mutex_unlock(&dev->dma_mu);
     return ptr;
 }

@@ -1,0 +1,64 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          cmake --version
+          c++ --version || clang++ --version
+          python3 --version
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DNVMESS_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: ctest
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Configure ASan + UBSan
+        run: cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DNVMESS_SANITIZE=ON -DNVMESS_BUILD_TESTS=ON
+
+      - name: Build ASan + UBSan
+        run: cmake --build build-asan -j
+
+      - name: ctest under ASan + UBSan
+        run: ctest --test-dir build-asan --output-on-failure
+
+      - name: Configure TSan
+        run: cmake -S . -B build-tsan -DCMAKE_BUILD_TYPE=Debug -DNVMESS_TSAN=ON -DNVMESS_BUILD_TESTS=ON
+
+      - name: Build TSan concurrency test
+        run: cmake --build build-tsan -j --target test_concurrency
+
+      - name: Run concurrency test under TSan
+        run: ./build-tsan/tests/test_concurrency
+
+      - name: Short experiment pass
+        run: python3 tools/run_experiments.py --quick
+
+      - name: Upload experiment artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nvmeslotswap-results-${{ matrix.os }}
+          path: |
+            results/report.md
+            results/summary.json
+            results/raw/*.json
+          if-no-files-found: warn
