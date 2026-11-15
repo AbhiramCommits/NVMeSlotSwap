@@ -131,14 +131,28 @@ static void cpu_relax(void)
 #endif
 }
 
-static void idle_wait(unsigned *spins)
+/*
+ * A queue that saw work in the last few milliseconds is "hot": the executor
+ * keeps polling instead of sleeping.  This avoids handing the host a
+ * scheduling-sized latency bump between submission batches, which would
+ * otherwise swamp the microseconds the harness is trying to measure.  Cold
+ * queues sleep, so idle queue pairs do not burn a core.
+ */
+#define NVMESS_HOT_WINDOW_NS 3000000ull
+#define NVMESS_COLD_SLEEP_NS 500000ull
+
+static void idle_wait(unsigned *spins, int hot)
 {
+    if (hot) {
+        cpu_relax();
+        return;
+    }
     if (*spins < NVMESS_IDLE_SPINS) {
         (*spins)++;
         cpu_relax();
     } else {
         *spins = 0;
-        sleep_ns(20000); /* 20 us */
+        sleep_ns(NVMESS_COLD_SLEEP_NS);
     }
 }
 
@@ -850,7 +864,7 @@ static int run_queue(nvme_dev_t *dev, uint16_t qid, uint32_t *rng, int max)
                 service_delay(service_time_ns(dev, rng));
             }
         }
-        q->commands++;
+        __atomic_add_fetch(&q->commands, 1, __ATOMIC_RELAXED);
         post_cqe(dev, q, qid, cid, res.cdw0, res.sc, res.sct, res.dnr);
         q_leave(q);
         done++;
@@ -987,6 +1001,7 @@ static void *controller_thread(void *arg)
     nvme_dev_t *dev = (nvme_dev_t *)arg;
     unsigned spins = 0;
     uint32_t rng = dev->cfg.seed ^ 0x5BD1E995u;
+    uint64_t hot_until = 0;
 
     while (__atomic_load_n(&dev->running, __ATOMIC_ACQUIRE)) {
         uint32_t cc = mmio_rd32(dev, NVME_REG_CC);
@@ -1006,6 +1021,7 @@ static void *controller_thread(void *arg)
         if (dev->rdy) {
             if (run_queue(dev, NVME_ADMIN_QID, &rng, 64) > 0) {
                 spins = 0;
+                hot_until = now_ns() + NVMESS_HOT_WINDOW_NS;
                 continue;
             }
         } else {
@@ -1019,11 +1035,12 @@ static void *controller_thread(void *arg)
             if (dev->q0_configured) {
                 if (run_admin_reject(dev) > 0) {
                     spins = 0;
+                    hot_until = now_ns() + NVMESS_HOT_WINDOW_NS;
                     continue;
                 }
             }
         }
-        idle_wait(&spins);
+        idle_wait(&spins, now_ns() < hot_until);
     }
     return NULL;
 }
@@ -1035,6 +1052,7 @@ static void *io_worker(void *argp)
     unsigned idx = (unsigned)(uintptr_t)arg[1];
     unsigned spins = 0;
     uint32_t rng = dev->cfg.seed + 0x9E3779B9u * (idx + 1u);
+    uint64_t hot_until = 0;
 
     free(arg);
 
@@ -1057,8 +1075,9 @@ static void *io_worker(void *argp)
         }
         if (did_work) {
             spins = 0;
+            hot_until = now_ns() + NVMESS_HOT_WINDOW_NS;
         } else {
-            idle_wait(&spins);
+            idle_wait(&spins, now_ns() < hot_until);
         }
     }
     return NULL;

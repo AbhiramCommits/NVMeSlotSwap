@@ -5,19 +5,24 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <iomanip>
+#include <sstream>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <memory>
 #include <string>
 #include <sys/stat.h>
+#include <sys/utsname.h>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 
 #include "nvme/backend.hpp"
 #include "nvme/device.h"
 #include "nvme/driver.hpp"
 #include "nvme/fw.h"
+#include "nvme/workload.hpp"
 
 namespace {
 
@@ -61,6 +66,9 @@ struct Options {
     std::string state_path;
     bool fail_commit = false;
     bool reset_after_commit = false;
+    unsigned seed = 12345;
+    unsigned stall_us = 0;
+    bool samples = false;
 };
 
 bool parse_opts(int argc, char **argv, Options &o, int start)
@@ -130,6 +138,16 @@ bool parse_opts(int argc, char **argv, Options &o, int start)
             o.fail_commit = true;
         } else if (a == "--reset") {
             o.reset_after_commit = true;
+        } else if (a == "--seed") {
+            const char *v = need("--seed");
+            if (!v) return false;
+            o.seed = static_cast<unsigned>(std::strtoul(v, nullptr, 10));
+        } else if (a == "--stall-us") {
+            const char *v = need("--stall-us");
+            if (!v) return false;
+            o.stall_us = static_cast<unsigned>(std::strtoul(v, nullptr, 10));
+        } else if (a == "--samples") {
+            o.samples = true;
         } else {
             std::fprintf(stderr, "nvmeslotswap: unknown option %s\n", a.c_str());
             return false;
@@ -494,6 +512,321 @@ void smoke_worker(SmokeCtx ctx)
     }
 }
 
+/* ------------------------------------------------------------------ */
+/* swap-test: continuous I/O across a firmware activation               */
+/* ------------------------------------------------------------------ */
+void sleep_ms(unsigned ms)
+{
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+}
+
+std::string host_description()
+{
+    struct utsname u;
+    std::ostringstream os;
+    if (uname(&u) == 0) {
+        os << u.sysname << " " << u.release << " " << u.machine;
+    } else {
+        os << "unknown";
+    }
+    long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+    os << " (" << (ncpu > 0 ? ncpu : 0) << " cpus)";
+    return os.str();
+}
+
+struct JsonWriter {
+    std::ostringstream os;
+    bool first = true;
+
+    void begin() { os << "{"; }
+    void end() { os << "}"; }
+    void key(const char *k)
+    {
+        if (!first) {
+            os << ",";
+        }
+        first = false;
+        os << "\"" << k << "\":";
+    }
+    void field(const char *k, const std::string &v)
+    {
+        key(k);
+        os << "\"" << v << "\"";
+    }
+    void field(const char *k, const char *v) { field(k, std::string(v)); }
+    void field(const char *k, long long v)
+    {
+        key(k);
+        os << v;
+    }
+    void field(const char *k, unsigned long long v)
+    {
+        key(k);
+        os << v;
+    }
+    void field(const char *k, int v)
+    {
+        key(k);
+        os << v;
+    }
+    void field(const char *k, unsigned v)
+    {
+        key(k);
+        os << v;
+    }
+    void field(const char *k, bool v)
+    {
+        key(k);
+        os << (v ? "true" : "false");
+    }
+    void field_us(const char *k, double v)
+    {
+        key(k);
+        os << std::fixed << std::setprecision(3) << v;
+    }
+    void nested(const char *k, const std::string &json)
+    {
+        key(k);
+        os << json;
+    }
+    std::string str() const { return os.str(); }
+};
+
+std::string latency_json(const nvme::LatencySummary &s)
+{
+    std::ostringstream os;
+    os << std::fixed << std::setprecision(3);
+    os << "{\"count\":" << s.count << ",\"mean\":" << s.mean_us << ",\"p50\":" << s.p50_us
+       << ",\"p90\":" << s.p90_us << ",\"p99\":" << s.p99_us << ",\"p999\":" << s.p999_us
+       << ",\"max\":" << s.max_us << "}";
+    return os.str();
+}
+
+std::string status_map_json(const std::map<uint16_t, uint64_t> &m)
+{
+    std::ostringstream os;
+    os << "{";
+    bool first = true;
+    for (const auto &kv : m) {
+        if (!first) {
+            os << ",";
+        }
+        first = false;
+        os << "\"" << kv.first << "\":" << kv.second;
+    }
+    os << "}";
+    return os.str();
+}
+
+int cmd_swap_test(const Options &o)
+{
+    if (o.action < -1 || o.action > 3) {
+        std::fprintf(stderr, "nvmeslotswap: --action must be none,0,1,2,3\n");
+        return 2;
+    }
+    if (o.depth < 2 || (o.depth & (o.depth - 1u)) != 0) {
+        std::fprintf(stderr, "nvmeslotswap: --depth must be a power of two\n");
+        return 2;
+    }
+    if (o.queues == 0 || o.queues > 8) {
+        std::fprintf(stderr, "nvmeslotswap: --queues must be 1..8\n");
+        return 2;
+    }
+
+    nvme_dev_cfg cfg = default_cfg();
+    /* Spawn exactly as many controller executors as the run uses. */
+    cfg.max_qid = o.queues;
+    cfg.io_worker_threads = o.queues;
+    nvme::SimBackend backend(cfg);
+    nvme::NvmeDriver drv(backend);
+    drv.reset_and_enable();
+    if (o.stall_us > 0) {
+        nvme_dev_set_stall(backend.device(), static_cast<uint64_t>(o.stall_us) * 1000ull);
+    }
+    nvme::IdentifyNs ns = drv.identify_ns(1);
+    drv.create_io_queues(o.queues, static_cast<uint16_t>(o.depth));
+
+    nvme::WorkloadConfig wc;
+    wc.queues = o.queues;
+    wc.depth = o.depth;
+    wc.read_ratio = o.rw / 100.0;
+    wc.seconds = (o.warmup_ms + o.post_ms) / 1000u + 6u;
+    wc.seed = o.seed;
+    wc.io_blocks = 2;
+
+    nvme::Workload wl(drv, wc);
+    uint64_t pf0 = nvme::now_ns();
+    wl.prefill();
+    double prefill_ms = static_cast<double>(nvme::now_ns() - pf0) / 1e6;
+
+    wl.start();
+    sleep_ms(o.warmup_ms);
+
+    nvme::FirmwareUpdater upd(drv);
+    uint8_t active_before = upd.read_slot_log().active_slot;
+    uint8_t active_after = active_before;
+    bool rollback = false;
+    bool verified = false;
+    bool staged_ok = true;
+    double activation_us = 0.0;
+    double downtime_us = 0.0;
+    uint64_t stage_us = 0;
+    std::string revision = o.rev;
+
+    if (o.action >= 0) {
+        std::vector<uint8_t> image =
+            nvme::FirmwareUpdater::build_image(revision, o.size, o.seed);
+        uint64_t s0 = nvme::now_ns();
+        nvme::StageResult sr = upd.stage(o.slot, image, 4096);
+        stage_us = (nvme::now_ns() - s0) / 1000;
+        staged_ok = sr.ok();
+        if (staged_ok) {
+            drv.set_self_test_fail(o.fail_commit);
+            /* For CA=2 the image has to exist in the slot before the
+             * activation request, so install it with CA=0 first. */
+            if (o.action == 2) {
+                nvme::CommitResult install = upd.commit(o.slot, nvme::CommitAction::Replace);
+                staged_ok = (install.status == 0);
+            }
+        }
+    }
+
+    uint64_t t_activate = nvme::now_ns();
+    if (o.action >= 0) {
+        wl.set_activation_time(t_activate);
+    }
+
+    nvme::CommitResult r;
+    if (staged_ok && o.action >= 0) {
+        if (o.action == 3) {
+            uint64_t t0 = nvme::now_ns();
+            r = upd.commit(o.slot, nvme::CommitAction::ReplaceActivateImmediate);
+            activation_us = static_cast<double>(nvme::now_ns() - t0) / 1000.0;
+            rollback = r.rolled_back;
+        } else if (o.action == 2) {
+            r = upd.commit(o.slot, nvme::CommitAction::Activate);
+            activation_us = static_cast<double>(r.latency_us);
+            wl.pause();
+            uint64_t d0 = nvme::now_ns();
+            drv.controller_reset();
+            drv.reset_and_enable();
+            drv.recreate_io_queues();
+            downtime_us = static_cast<double>(nvme::now_ns() - d0) / 1000.0;
+            wl.resume();
+        } else if (o.action == 1) {
+            r = upd.commit(o.slot, nvme::CommitAction::ReplaceActivate);
+            activation_us = static_cast<double>(r.latency_us);
+            wl.pause();
+            uint64_t d0 = nvme::now_ns();
+            drv.controller_reset();
+            drv.reset_and_enable();
+            drv.recreate_io_queues();
+            downtime_us = static_cast<double>(nvme::now_ns() - d0) / 1000.0;
+            wl.resume();
+        } else {
+            r = upd.commit(o.slot, nvme::CommitAction::Replace);
+            activation_us = static_cast<double>(r.latency_us);
+        }
+    }
+
+    sleep_ms(o.post_ms);
+    wl.stop();
+    nvme::WorkloadStats st = wl.stats();
+
+    nvme::FwSlotInfo after = upd.read_slot_log();
+    active_after = after.active_slot;
+    if (o.action == 3) {
+        verified = !rollback && active_after == o.slot;
+    } else if (o.action == 1 || o.action == 2) {
+        verified = active_after == o.slot;
+    }
+
+    JsonWriter j;
+    j.begin();
+    {
+        std::ostringstream cfg_json;
+        cfg_json << "{\"queues\":" << o.queues << ",\"depth\":" << o.depth
+                 << ",\"warmup_ms\":" << o.warmup_ms << ",\"post_ms\":" << o.post_ms
+                 << ",\"rw\":" << o.rw << ",\"seed\":" << o.seed << ",\"slot\":" << o.slot
+                 << ",\"rev\":\"" << revision << "\",\"size\":" << o.size
+                 << ",\"action\":" << o.action << ",\"fail_commit\":"
+                 << (o.fail_commit ? "true" : "false") << ",\"stall_us\":" << o.stall_us
+                 << "}";
+        j.nested("config", cfg_json.str());
+    }
+    j.field("activation_action", o.action);
+    j.field_us("activation_latency_us", activation_us);
+    j.field_us("controller_downtime_us", downtime_us);
+    j.field("submitted", static_cast<unsigned long long>(st.submitted));
+    j.field("completed", static_cast<unsigned long long>(st.completed));
+    j.field("dropped", static_cast<unsigned long long>(st.dropped));
+    j.field("failed", static_cast<unsigned long long>(st.failed));
+    j.nested("failed_by_status", status_map_json(st.failed_by_status));
+    j.field("integrity_errors", static_cast<unsigned long long>(st.integrity_errors));
+    j.field("eagain_stalls", static_cast<unsigned long long>(st.eagain_stalls));
+    j.field_us("max_gap_us", st.max_gap_us);
+    j.field_us("iops", st.iops);
+    j.nested("latency_us", latency_json(st.steady));
+    j.nested("swap_window_latency_us", latency_json(st.window));
+    j.field_us("swap_window_max_gap_us", st.window.max_gap_us);
+    j.field_us("activation_gap_us", st.activation_gap_us);
+    j.field("active_slot_before", active_before);
+    j.field("active_slot_after", active_after);
+    j.field("rollback_occurred", rollback);
+    j.field("activation_verified", verified);
+    j.field("stage_us", static_cast<unsigned long long>(stage_us));
+    j.field_us("prefill_ms", prefill_ms);
+    j.field_us("duration_s", st.duration_s);
+    j.field("namespace_lbas", static_cast<unsigned long long>(ns.nsze));
+    j.field("host", host_description());
+    if (o.samples) {
+        std::ostringstream os;
+        os << "[" << std::fixed << std::setprecision(3);
+        const std::vector<double> samples = wl.latency_samples_us();
+        for (size_t i = 0; i < samples.size(); ++i) {
+            if (i != 0) {
+                os << ",";
+            }
+            os << samples[i];
+        }
+        os << "]";
+        j.nested("latency_samples_us", os.str());
+    }
+    if (o.samples) {
+        std::ostringstream os;
+        os << "[" << std::fixed << std::setprecision(3);
+        const std::vector<double> samples = wl.window_samples_us();
+        for (size_t i = 0; i < samples.size(); ++i) {
+            if (i != 0) {
+                os << ",";
+            }
+            os << samples[i];
+        }
+        os << "]";
+        j.nested("window_samples_us", os.str());
+    }
+    j.end();
+
+    std::string json = j.str();
+    if (!o.json_path.empty()) {
+        if (!nvme::write_file_bytes(o.json_path, std::vector<uint8_t>(json.begin(), json.end()))) {
+            std::fprintf(stderr, "nvmeslotswap: cannot write %s\n", o.json_path.c_str());
+            return 1;
+        }
+    } else {
+        std::printf("%s\n", json.c_str());
+    }
+    std::fprintf(stderr,
+                 "swap-test: action=%d iops=%.0f completed=%llu dropped=%llu failed=%llu "
+                 "integrity_errors=%llu max_gap=%.1fus p99=%.2fus downtime=%.0fus%s\n",
+                 o.action, st.iops, static_cast<unsigned long long>(st.completed),
+                 static_cast<unsigned long long>(st.dropped),
+                 static_cast<unsigned long long>(st.failed),
+                 static_cast<unsigned long long>(st.integrity_errors), st.max_gap_us,
+                 st.steady.p99_us, downtime_us, rollback ? " rollback" : "");
+    return 0;
+}
+
 int cmd_io(const Options &o)
 {
     nvme_dev_cfg cfg = default_cfg();
@@ -588,6 +921,9 @@ int main(int argc, char **argv)
         }
         if (std::strcmp(cmd, "fw") == 0) {
             return cmd_fw(argc, argv, opts);
+        }
+        if (std::strcmp(cmd, "swap-test") == 0) {
+            return cmd_swap_test(opts);
         }
     } catch (const std::exception &e) {
         std::fprintf(stderr, "nvmeslotswap: %s\n", e.what());

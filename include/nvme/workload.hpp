@@ -34,6 +34,10 @@ struct WorkloadStats {
     double duration_s = 0.0;
     double iops = 0.0;
     double max_gap_us = 0.0;
+    /* Longest completion gap whose two ends sit in the 20 ms after the
+     * activation timestamp: isolates the activation's own I/O interruption
+     * from scheduler noise elsewhere in the run. */
+    double activation_gap_us = 0.0;
     std::map<uint16_t, uint64_t> failed_by_status;
     LatencySummary steady;
     LatencySummary window;
@@ -76,6 +80,10 @@ public:
     uint64_t namespace_lbas() const { return ns_lbas_; }
     const WorkloadConfig &config() const { return cfg_; }
 
+    /* Up to 4096 raw latency samples (microseconds) from the reservoir. */
+    std::vector<double> latency_samples_us() const;
+    std::vector<double> window_samples_us() const;
+
 private:
     void fill_buffer(DmaBuffer *buf, uint64_t slba) const;
     bool verify_buffer(const DmaBuffer *buf, uint64_t slba) const;
@@ -97,6 +105,7 @@ private:
     std::atomic<uint64_t> eagain_{0};
     std::atomic<uint64_t> integrity_errors_{0};
     std::atomic<uint64_t> left_in_flight_{0};
+    std::atomic<uint64_t> activation_gap_ns_{0};
 
     LatencyRecorder latency_;
     LatencyRecorder window_latency_;

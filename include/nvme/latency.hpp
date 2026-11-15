@@ -41,6 +41,7 @@ public:
     uint64_t p999_ns() const { return percentile_ns(99.9); }
 
     double max_gap_us() const;
+    uint64_t last_completion_ns() const;
 
     std::vector<uint64_t> reservoir() const;
 
