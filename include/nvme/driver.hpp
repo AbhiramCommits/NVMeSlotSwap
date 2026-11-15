@@ -52,6 +52,7 @@ struct CmdHandle {
     uint16_t cid = 0;
     unsigned qid = 0;
     uint64_t submit_ns = 0;
+    bool ok = true;
 };
 
 struct FwSlotInfo {
@@ -163,6 +164,8 @@ public:
 
 private:
     void init_admin_queue();
+    CmdHandle submit_io(unsigned qidx, uint8_t opc, uint64_t slba, uint16_t nlb,
+                        const DmaBuffer &buf);
     Completion admin_wait(uint16_t cid);
     int submit_admin_async(const nvme_sqe &sqe, uint16_t cid);
     DmaBuffer *admin_buf();

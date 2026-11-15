@@ -26,6 +26,9 @@ public:
     virtual void dma_free(void *ptr) = 0;
     virtual const char *name() const = 0;
     virtual bool is_simulated() const = 0;
+    /* Non-null only for backends that host the controller in-process; the
+     * VFIO backend reaches the same contract through mapped BAR0/DMA. */
+    virtual nvme_dev_t *sim_device() { return nullptr; }
 };
 
 /* In-process emulated controller (default on every host, including macOS). */
@@ -57,6 +60,7 @@ public:
     void dma_free(void *ptr) override { nvme_dev_dma_unmap(dev_, ptr); }
     const char *name() const override { return "sim"; }
     bool is_simulated() const override { return true; }
+    nvme_dev_t *sim_device() override { return dev_; }
 
     nvme_dev_t *device() const { return dev_; }
 

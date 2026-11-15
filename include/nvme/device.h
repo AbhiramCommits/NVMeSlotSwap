@@ -68,6 +68,7 @@ uint32_t nvme_dev_csts(nvme_dev_t *dev);
 uint64_t nvme_dev_ready_count(nvme_dev_t *dev); /* CC.EN 0->1 transitions */
 uint64_t nvme_dev_reset_count(nvme_dev_t *dev);
 uint64_t nvme_dev_last_activation_ns(nvme_dev_t *dev);
+uint64_t nvme_dev_command_count(nvme_dev_t *dev);
 
 /* Persist/restore only the emulated firmware subsystem.  The CLI uses this so
  * that `fw stage`, `fw commit` and `fw list` observe the same emulated part
