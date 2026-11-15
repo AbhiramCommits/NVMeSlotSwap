@@ -92,6 +92,12 @@ void nvme_qp_reset(struct nvme_qp *qp)
     __atomic_store_n(&qp->sq_tail, 0, __ATOMIC_RELAXED);
     __atomic_store_n(&qp->cq_head, 0, __ATOMIC_RELAXED);
     __atomic_store_n(&qp->cq_phase, 1, __ATOMIC_RELAXED);
+    /* Counters restart with the queues: the in-flight calculation is
+     * (sq_tail_resv - completed), so both baselines must be zero after a
+     * controller reset. */
+    __atomic_store_n(&qp->submitted, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&qp->completed, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&qp->stalls, 0, __ATOMIC_RELAXED);
     __atomic_store_n(&qp->inflight, 0, __ATOMIC_RELAXED);
     if (qp->sq != NULL) {
         memset(qp->sq, 0, qp->sq_bytes);

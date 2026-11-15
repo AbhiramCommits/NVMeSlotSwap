@@ -46,6 +46,7 @@ struct fw_mgr {
     int self_test_fail; /* injected post-activation self-test failure */
     uint64_t activation_count;
     uint64_t rollback_count;
+    char active_revision[9]; /* NUL-terminated copy of the active slot's rev */
 };
 
 struct fw_commit_result {
@@ -64,7 +65,18 @@ void fw_mgr_free(struct fw_mgr *fw);
 uint16_t fw_mgr_download_chunk(struct fw_mgr *fw, uint32_t ofst, const void *data,
                                uint32_t len);
 
-/* FW Commit.  action is NVME_FW_CA_*; slot is 1..7. */
+/*
+ * FW Commit is split so the controller can do all validation and the slot
+ * write before it quiesces I/O:
+ *   fw_mgr_prepare()  - validate the staged image, install the slot, return a
+ *                       status.  No activation yet, no I/O impact.
+ *   fw_mgr_apply()    - flip the active slot (CA=3), mark a pending activation
+ *                       (CA=1/2), or leave the slot idle (CA=0).
+ * fw_mgr_commit() is the convenience composition used by unit tests.
+ */
+uint16_t fw_mgr_prepare(struct fw_mgr *fw, uint8_t slot, uint8_t action);
+struct fw_commit_result fw_mgr_apply(struct fw_mgr *fw, uint8_t slot, uint8_t action,
+                                     int self_test_fail);
 struct fw_commit_result fw_mgr_commit(struct fw_mgr *fw, uint8_t slot, uint8_t action,
                                       int self_test_fail);
 

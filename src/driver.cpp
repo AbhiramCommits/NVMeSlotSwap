@@ -17,6 +17,7 @@
 
 #include "nvme/fw.h"
 #include "nvme/regs.h"
+#include "sha256.h"
 
 namespace nvme {
 
@@ -605,6 +606,166 @@ void NvmeDriver::save_fw_state(const std::string &path)
 bool NvmeDriver::load_fw_state(const std::string &path)
 {
     return nvme_dev_load_fw_state(backend_.sim_device(), path.c_str()) == 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* FirmwareUpdater                                                     */
+/* ------------------------------------------------------------------ */
+std::string FirmwareUpdater::normalize_revision(const std::string &rev)
+{
+    std::string r = rev.substr(0, 8);
+    r.resize(8, ' ');
+    return r;
+}
+
+std::vector<uint8_t> FirmwareUpdater::build_image(const std::string &revision,
+                                                  size_t payload_len, uint32_t seed)
+{
+    /* Keep the image a whole number of dwords: FW Image Download counts data
+     * in dwords. */
+    payload_len = (payload_len + 3u) & ~static_cast<size_t>(3u);
+    if (payload_len > NVME_FW_MAX_IMAGE_BYTES - sizeof(nvme_fw_image_hdr)) {
+        throw std::invalid_argument("firmware image is larger than the slot limit");
+    }
+
+    nvme_fw_image_hdr hdr;
+    std::memset(&hdr, 0, sizeof(hdr));
+    std::memcpy(hdr.magic, "NVFW", 4);
+    hdr.version = NVME_FW_IMAGE_VERSION;
+    std::string rev8 = normalize_revision(revision);
+    std::memcpy(hdr.revision, rev8.data(), 8);
+    hdr.payload_len = static_cast<uint32_t>(payload_len);
+
+    std::vector<uint8_t> image(sizeof(hdr) + payload_len);
+    uint8_t *payload = image.data() + sizeof(hdr);
+    uint64_t x = 0x9E3779B97F4A7C15ull ^ static_cast<uint64_t>(seed);
+    for (size_t i = 0; i < payload_len; ++i) {
+        x += 0x9E3779B97F4A7C15ull;
+        uint64_t z = x;
+        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+        z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+        z ^= z >> 31;
+        payload[i] = static_cast<uint8_t>(z);
+    }
+    sha256(payload, payload_len, hdr.sha256);
+    std::memcpy(image.data(), &hdr, sizeof(hdr));
+    return image;
+}
+
+StageResult FirmwareUpdater::stage(unsigned slot, const std::vector<uint8_t> &image,
+                                   size_t chunk_bytes)
+{
+    if (slot < 1 || slot > NVME_FW_SLOT_COUNT) {
+        throw std::invalid_argument("firmware slot must be 1..7");
+    }
+    if (chunk_bytes == 0 || chunk_bytes > NVME_LBA_SIZE || (chunk_bytes % 4) != 0) {
+        throw std::invalid_argument("chunk size must be a non-zero multiple of 4 up to 4096");
+    }
+    if (image.size() < sizeof(nvme_fw_image_hdr) || (image.size() % 4) != 0) {
+        throw std::invalid_argument("firmware image must be header plus whole dwords");
+    }
+
+    DmaBufferPool pool(driver_.backend(), NVME_LBA_SIZE, 1);
+    DmaBuffer *buf = pool.acquire();
+    if (buf == nullptr) {
+        throw std::runtime_error("unable to allocate a firmware download buffer");
+    }
+
+    StageResult result;
+    result.bytes = image.size();
+    const uint64_t start = now_ns();
+    size_t off = 0;
+    while (off < image.size()) {
+        size_t n = image.size() - off;
+        if (n > chunk_bytes) {
+            n = chunk_bytes;
+        }
+        std::memcpy(buf->ptr, image.data() + off, n);
+
+        nvme_sqe sqe{};
+        sqe.opc = NVME_ADMIN_FW_IMAGE_DOWNLOAD;
+        sqe.nsid = 0;
+        sqe.prp1 = buf->iova;
+        sqe.cdw10 = static_cast<uint32_t>(n / 4u) - 1u;           /* NUMD, 0-based */
+        sqe.cdw11 = static_cast<uint32_t>(off / 4u);              /* OFST in dwords */
+        Completion c = driver_.sync_admin(sqe);
+        if (!c.ok()) {
+            result.status = static_cast<uint16_t>(c.sc);
+            result.elapsed_us = (now_ns() - start) / 1000;
+            pool.release(buf);
+            return result;
+        }
+        off += n;
+        result.chunks++;
+    }
+    result.status = 0;
+    result.elapsed_us = (now_ns() - start) / 1000;
+    pool.release(buf);
+    return result;
+}
+
+CommitResult FirmwareUpdater::commit(unsigned slot, CommitAction action)
+{
+    FwSlotInfo before = read_slot_log();
+
+    nvme_sqe sqe{};
+    sqe.opc = NVME_ADMIN_FW_COMMIT;
+    sqe.nsid = 0;
+    sqe.cdw10 = (static_cast<uint32_t>(slot) & 0x7u) |
+                ((static_cast<uint32_t>(action) & 0x7u) << 3);
+    sqe.cdw11 = 0; /* BPID 0 */
+
+    const uint64_t start = now_ns();
+    Completion c = driver_.sync_admin(sqe);
+    const uint64_t elapsed = now_ns() - start;
+
+    FwSlotInfo after = read_slot_log();
+    CommitResult r;
+    r.status = static_cast<uint16_t>(c.sc);
+    r.requires_reset = (c.sc == NVME_SC_FW_ACTIVATION_REQUIRES_RESET);
+    r.active_slot = after.active_slot;
+    r.next_slot = after.next_slot;
+    if (after.active_slot >= 1 && after.active_slot <= 7) {
+        r.active_revision = after.revisions[after.active_slot - 1];
+    }
+    if (action == CommitAction::ReplaceActivateImmediate && !c.ok() && slot >= 1 &&
+        slot <= 7 && before.revisions[slot - 1] != after.revisions[slot - 1] &&
+        after.active_slot == before.active_slot) {
+        /* The target slot now carries the new revision, but the active slot
+         * did not change: the controller installed the image, failed its
+         * post-activation self test and rolled back. */
+        r.rolled_back = true;
+    }
+    r.latency_us = elapsed / 1000;
+    return r;
+}
+
+FwSlotInfo FirmwareUpdater::read_slot_log() { return driver_.read_slot_log(); }
+
+bool FirmwareUpdater::verify_activation(const std::string &revision)
+{
+    FwSlotInfo info = read_slot_log();
+    if (info.active_slot < 1 || info.active_slot > 7) {
+        return false;
+    }
+    std::string active = info.revisions[info.active_slot - 1];
+    std::string want = revision;
+    while (!active.empty() && active.back() == ' ') {
+        active.pop_back();
+    }
+    while (!want.empty() && want.back() == ' ') {
+        want.pop_back();
+    }
+    return active == want;
+}
+
+std::string FirmwareUpdater::active_revision()
+{
+    FwSlotInfo info = read_slot_log();
+    if (info.active_slot >= 1 && info.active_slot <= 7) {
+        return info.revisions[info.active_slot - 1];
+    }
+    return {};
 }
 
 /* ------------------------------------------------------------------ */

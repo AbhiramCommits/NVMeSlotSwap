@@ -671,9 +671,19 @@ static struct cmd_result exec_fw_commit(nvme_dev_t *dev, const struct nvme_sqe *
     uint8_t slot = (uint8_t)(sqe->cdw10 & 0x7u);
     uint8_t action = (uint8_t)((sqe->cdw10 >> 3) & 0x7u);
     struct fw_commit_result res;
-    int quiesce = (action == (uint8_t)NVME_FW_CA_REPLACE_ACTIVATE_IMMEDIATE &&
-                   slot > NVME_FW_SLOT1 && slot <= NVME_FW_SLOT_COUNT);
+    int quiesce;
 
+    /*
+     * Validate the image and write the idle slot first.  The payload SHA-256
+     * and the 1 MiB copy happen here, while I/O is still flowing normally.
+     */
+    uint16_t st = fw_mgr_prepare(&dev->fw, slot, action);
+    if (st != NVME_SC_SUCCESS) {
+        return err_result(st);
+    }
+
+    quiesce = (action == (uint8_t)NVME_FW_CA_REPLACE_ACTIVATE_IMMEDIATE && slot > NVME_FW_SLOT1 &&
+               slot <= NVME_FW_SLOT_COUNT);
     if (quiesce) {
         /*
          * Quiesce: stop fetching new SQEs for the activation window, but do
@@ -684,8 +694,8 @@ static struct cmd_result exec_fw_commit(nvme_dev_t *dev, const struct nvme_sqe *
         sleep_ns(__atomic_load_n(&dev->stall_ns, __ATOMIC_ACQUIRE));
     }
 
-    res = fw_mgr_commit(&dev->fw, slot, action,
-                        __atomic_load_n(&dev->self_test_fail, __ATOMIC_ACQUIRE));
+    res = fw_mgr_apply(&dev->fw, slot, action,
+                       __atomic_load_n(&dev->self_test_fail, __ATOMIC_ACQUIRE));
 
     if (quiesce) {
         __atomic_store_n(&dev->pause_io, 0, __ATOMIC_RELEASE);
@@ -1239,6 +1249,7 @@ void nvme_dev_set_stall(nvme_dev_t *dev, uint64_t ns)
 void nvme_dev_set_self_test_fail(nvme_dev_t *dev, int fail)
 {
     __atomic_store_n(&dev->self_test_fail, fail, __ATOMIC_RELEASE);
+    dev->fw.self_test_fail = fail;
 }
 
 uint32_t nvme_dev_csts(nvme_dev_t *dev) { return mmio_rd32(dev, NVME_REG_CSTS); }
