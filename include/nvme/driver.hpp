@@ -91,27 +91,27 @@ uint64_t boot_relative_ns();
 
 /* 4096-byte aligned, device-visible "DMA" buffer. */
 struct DmaBuffer {
-    void *ptr = nullptr;
+    void* ptr = nullptr;
     uint64_t iova = 0;
     size_t size = 0;
 };
 
 class DmaBufferPool {
 public:
-    DmaBufferPool(Backend &backend, size_t buffer_size, size_t count);
+    DmaBufferPool(Backend& backend, size_t buffer_size, size_t count);
     ~DmaBufferPool();
 
-    DmaBufferPool(const DmaBufferPool &) = delete;
-    DmaBufferPool &operator=(const DmaBufferPool &) = delete;
+    DmaBufferPool(const DmaBufferPool&) = delete;
+    DmaBufferPool& operator=(const DmaBufferPool&) = delete;
 
-    DmaBuffer *acquire();
-    void release(DmaBuffer *buf);
+    DmaBuffer* acquire();
+    void release(DmaBuffer* buf);
     size_t free_count() const;
 
 private:
-    Backend &backend_;
+    Backend& backend_;
     std::vector<std::unique_ptr<DmaBuffer>> buffers_;
-    std::vector<DmaBuffer *> free_;
+    std::vector<DmaBuffer*> free_;
     mutable std::mutex mutex_;
 };
 
@@ -123,13 +123,13 @@ struct QueuePair {
 
 class NvmeDriver {
 public:
-    explicit NvmeDriver(Backend &backend);
+    explicit NvmeDriver(Backend& backend);
     ~NvmeDriver();
 
-    NvmeDriver(const NvmeDriver &) = delete;
-    NvmeDriver &operator=(const NvmeDriver &) = delete;
+    NvmeDriver(const NvmeDriver&) = delete;
+    NvmeDriver& operator=(const NvmeDriver&) = delete;
 
-    Backend &backend() { return backend_; }
+    Backend& backend() { return backend_; }
 
     void reset_and_enable();
     void controller_reset();
@@ -147,31 +147,31 @@ public:
     unsigned io_queue_count() const { return static_cast<unsigned>(queues_.size()); }
     unsigned io_depth() const { return io_depth_; }
 
-    QueuePair &queue(unsigned idx);
-    CmdHandle submit_read(unsigned q, uint64_t slba, uint16_t nlb, const DmaBuffer &buf);
-    CmdHandle submit_write(unsigned q, uint64_t slba, uint16_t nlb, const DmaBuffer &buf);
+    QueuePair& queue(unsigned idx);
+    CmdHandle submit_read(unsigned q, uint64_t slba, uint16_t nlb, const DmaBuffer& buf);
+    CmdHandle submit_write(unsigned q, uint64_t slba, uint16_t nlb, const DmaBuffer& buf);
     CmdHandle submit_flush(unsigned q);
     std::optional<Completion> poll(unsigned q);
-    int poll_batch(unsigned q, Completion *out, int max);
+    int poll_batch(unsigned q, Completion* out, int max);
 
-    Completion sync_admin(const nvme_sqe &sqe);
-    Completion sync_admin_checked(const nvme_sqe &sqe, const char *what);
+    Completion sync_admin(const nvme_sqe& sqe);
+    Completion sync_admin_checked(const nvme_sqe& sqe, const char* what);
     void set_self_test_fail(bool fail);
-    void save_fw_state(const std::string &path);
-    bool load_fw_state(const std::string &path);
+    void save_fw_state(const std::string& path);
+    bool load_fw_state(const std::string& path);
 
     static constexpr unsigned kAdminDepth = 32;
 
 private:
     void init_admin_queue();
     CmdHandle submit_io(unsigned qidx, uint8_t opc, uint64_t slba, uint16_t nlb,
-                        const DmaBuffer &buf);
+                        const DmaBuffer& buf);
     Completion admin_wait(uint16_t cid);
-    int submit_admin_async(const nvme_sqe &sqe, uint16_t cid);
-    DmaBuffer *admin_buf();
+    int submit_admin_async(const nvme_sqe& sqe, uint16_t cid);
+    DmaBuffer* admin_buf();
 
-    Backend &backend_;
-    volatile void *bar0_ = nullptr;
+    Backend& backend_;
+    volatile void* bar0_ = nullptr;
     uint32_t doorbell_stride_ = 0;
 
     QueuePair admin_{};
@@ -185,27 +185,27 @@ private:
 
 class FirmwareUpdater {
 public:
-    explicit FirmwareUpdater(NvmeDriver &driver) : driver_(driver) {}
+    explicit FirmwareUpdater(NvmeDriver& driver) : driver_(driver) {}
 
     /* Builds header + deterministic payload with the payload SHA-256 filled in. */
-    static std::vector<uint8_t> build_image(const std::string &revision, size_t payload_len,
+    static std::vector<uint8_t> build_image(const std::string& revision, size_t payload_len,
                                             uint32_t seed);
 
-    StageResult stage(unsigned slot, const std::vector<uint8_t> &image, size_t chunk_bytes);
+    StageResult stage(unsigned slot, const std::vector<uint8_t>& image, size_t chunk_bytes);
     CommitResult commit(unsigned slot, CommitAction action);
     FwSlotInfo read_slot_log();
-    bool verify_activation(const std::string &revision);
+    bool verify_activation(const std::string& revision);
     std::string active_revision();
 
-    static std::string normalize_revision(const std::string &rev);
+    static std::string normalize_revision(const std::string& rev);
 
 private:
-    NvmeDriver &driver_;
+    NvmeDriver& driver_;
 };
 
 /* Reads a raw Image Download / Commit payload from disk (host-side cache). */
-std::vector<uint8_t> read_file_bytes(const std::string &path);
-bool write_file_bytes(const std::string &path, const std::vector<uint8_t> &bytes);
+std::vector<uint8_t> read_file_bytes(const std::string& path);
+bool write_file_bytes(const std::string& path, const std::vector<uint8_t>& bytes);
 
 } // namespace nvme
 

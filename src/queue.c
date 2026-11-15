@@ -27,8 +27,7 @@
 #include "nvme/device.h"
 #include "nvme/regs.h"
 
-int nvme_qp_init(struct nvme_qp *qp, nvme_dev_t *dev, uint16_t qid, uint16_t depth)
-{
+int nvme_qp_init(struct nvme_qp* qp, nvme_dev_t* dev, uint16_t qid, uint16_t depth) {
     if (qp == NULL || dev == NULL || depth < 2) {
         return -EINVAL;
     }
@@ -40,11 +39,11 @@ int nvme_qp_init(struct nvme_qp *qp, nvme_dev_t *dev, uint16_t qid, uint16_t dep
     qp->sq_bytes = (uint32_t)depth * NVME_SQ_ENTRY_SIZE;
     qp->cq_bytes = (uint32_t)depth * NVME_CQ_ENTRY_SIZE;
 
-    qp->sq = (struct nvme_sqe *)nvme_dev_dma_map(dev, qp->sq_bytes, &qp->sq_iova);
+    qp->sq = (struct nvme_sqe*)nvme_dev_dma_map(dev, qp->sq_bytes, &qp->sq_iova);
     if (qp->sq == NULL) {
         return -ENOMEM;
     }
-    qp->cq = (struct nvme_cqe *)nvme_dev_dma_map(dev, qp->cq_bytes, &qp->cq_iova);
+    qp->cq = (struct nvme_cqe*)nvme_dev_dma_map(dev, qp->cq_bytes, &qp->cq_iova);
     if (qp->cq == NULL) {
         nvme_dev_dma_unmap(dev, qp->sq);
         memset(qp, 0, sizeof(*qp));
@@ -54,10 +53,8 @@ int nvme_qp_init(struct nvme_qp *qp, nvme_dev_t *dev, uint16_t qid, uint16_t dep
     memset(qp->cq, 0, qp->cq_bytes);
 
     uint32_t stride = nvme_dev_doorbell_stride(dev);
-    qp->sq_db = (volatile uint32_t *)((volatile char *)nvme_dev_bar0(dev) +
-                                      NVME_SQ_DBL(qid, stride));
-    qp->cq_db = (volatile uint32_t *)((volatile char *)nvme_dev_bar0(dev) +
-                                      NVME_CQ_DBL(qid, stride));
+    qp->sq_db = (volatile uint32_t*)((volatile char*)nvme_dev_bar0(dev) + NVME_SQ_DBL(qid, stride));
+    qp->cq_db = (volatile uint32_t*)((volatile char*)nvme_dev_bar0(dev) + NVME_CQ_DBL(qid, stride));
 
     qp->cq_phase = 1;
     qp->sq_tail_resv = 0;
@@ -66,8 +63,7 @@ int nvme_qp_init(struct nvme_qp *qp, nvme_dev_t *dev, uint16_t qid, uint16_t dep
     return 0;
 }
 
-void nvme_qp_destroy(struct nvme_qp *qp)
-{
+void nvme_qp_destroy(struct nvme_qp* qp) {
     if (qp == NULL || qp->dev == NULL) {
         return;
     }
@@ -86,8 +82,7 @@ void nvme_qp_destroy(struct nvme_qp *qp)
  * queues over the same buffers.  The CQ is cleared so that a stale phase-tag
  * match cannot deliver a completion from before the reset.
  */
-void nvme_qp_reset(struct nvme_qp *qp)
-{
+void nvme_qp_reset(struct nvme_qp* qp) {
     __atomic_store_n(&qp->sq_tail_resv, 0, __ATOMIC_RELAXED);
     __atomic_store_n(&qp->sq_tail, 0, __ATOMIC_RELAXED);
     __atomic_store_n(&qp->cq_head, 0, __ATOMIC_RELAXED);
@@ -107,8 +102,7 @@ void nvme_qp_reset(struct nvme_qp *qp)
     }
 }
 
-int nvme_qp_submit(struct nvme_qp *qp, const struct nvme_sqe *sqe, uint16_t cid)
-{
+int nvme_qp_submit(struct nvme_qp* qp, const struct nvme_sqe* sqe, uint16_t cid) {
     uint32_t cur = __atomic_load_n(&qp->sq_tail_resv, __ATOMIC_RELAXED);
 
     /*
@@ -124,13 +118,13 @@ int nvme_qp_submit(struct nvme_qp *qp, const struct nvme_sqe *sqe, uint16_t cid)
             __atomic_fetch_add(&qp->stalls, 1, __ATOMIC_RELAXED);
             return NVME_QP_EAGAIN;
         }
-        if (__atomic_compare_exchange_n(&qp->sq_tail_resv, &cur, cur + 1, 0,
-                                        __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+        if (__atomic_compare_exchange_n(&qp->sq_tail_resv, &cur, cur + 1, 0, __ATOMIC_RELAXED,
+                                        __ATOMIC_RELAXED)) {
             break;
         }
     }
 
-    struct nvme_sqe *slot = &qp->sq[cur % qp->depth];
+    struct nvme_sqe* slot = &qp->sq[cur % qp->depth];
     memcpy(slot, sqe, sizeof(*slot));
     slot->cid = cid;
 
@@ -149,8 +143,7 @@ int nvme_qp_submit(struct nvme_qp *qp, const struct nvme_sqe *sqe, uint16_t cid)
     return 0;
 }
 
-int nvme_qp_reap(struct nvme_qp *qp, struct nvme_cqe *out, int max)
-{
+int nvme_qp_reap(struct nvme_qp* qp, struct nvme_cqe* out, int max) {
     int n = 0;
     uint32_t head = qp->cq_head;
     uint8_t phase = qp->cq_phase;
@@ -160,7 +153,7 @@ int nvme_qp_reap(struct nvme_qp *qp, struct nvme_cqe *out, int max)
     }
 
     while (n < max) {
-        struct nvme_cqe *cqe = &qp->cq[head];
+        struct nvme_cqe* cqe = &qp->cq[head];
         uint16_t status = __atomic_load_n(&cqe->status, __ATOMIC_ACQUIRE);
         if (nvme_cqe_phase(status) != phase) {
             break;
@@ -190,29 +183,24 @@ int nvme_qp_reap(struct nvme_qp *qp, struct nvme_cqe *out, int max)
     return n;
 }
 
-bool nvme_qp_full(const struct nvme_qp *qp)
-{
+bool nvme_qp_full(const struct nvme_qp* qp) {
     uint32_t resv = __atomic_load_n(&qp->sq_tail_resv, __ATOMIC_RELAXED);
     uint32_t done = (uint32_t)__atomic_load_n(&qp->completed, __ATOMIC_ACQUIRE);
     return (uint16_t)(resv - done) >= qp->depth;
 }
 
-uint64_t nvme_qp_submitted(const struct nvme_qp *qp)
-{
+uint64_t nvme_qp_submitted(const struct nvme_qp* qp) {
     return __atomic_load_n(&qp->submitted, __ATOMIC_RELAXED);
 }
 
-uint64_t nvme_qp_completed(const struct nvme_qp *qp)
-{
+uint64_t nvme_qp_completed(const struct nvme_qp* qp) {
     return __atomic_load_n(&qp->completed, __ATOMIC_RELAXED);
 }
 
-uint64_t nvme_qp_stalls(const struct nvme_qp *qp)
-{
+uint64_t nvme_qp_stalls(const struct nvme_qp* qp) {
     return __atomic_load_n(&qp->stalls, __ATOMIC_RELAXED);
 }
 
-uint64_t nvme_qp_inflight(const struct nvme_qp *qp)
-{
+uint64_t nvme_qp_inflight(const struct nvme_qp* qp) {
     return __atomic_load_n(&qp->inflight, __ATOMIC_RELAXED);
 }

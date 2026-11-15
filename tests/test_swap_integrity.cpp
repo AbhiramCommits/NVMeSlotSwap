@@ -10,8 +10,7 @@
 
 namespace nvme {
 
-TEST(SwapIntegrity, Ca3ActivationLosesNothing)
-{
+TEST(SwapIntegrity, Ca3ActivationLosesNothing) {
     nvme_dev_cfg cfg;
     nvme_dev_cfg_default(&cfg);
     cfg.ns_lba_count = 4096;
@@ -37,8 +36,7 @@ TEST(SwapIntegrity, Ca3ActivationLosesNothing)
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
 
     FirmwareUpdater updater(driver);
-    std::vector<uint8_t> image =
-        FirmwareUpdater::build_image("FW2.0.1", 128 * 1024, 0x5150);
+    std::vector<uint8_t> image = FirmwareUpdater::build_image("FW2.0.1", 128 * 1024, 0x5150);
     StageResult staged = updater.stage(2, image, 4096);
     ASSERT_TRUE(staged.ok());
 
@@ -63,8 +61,7 @@ TEST(SwapIntegrity, Ca3ActivationLosesNothing)
     EXPECT_TRUE(updater.verify_activation("FW2.0.1"));
 }
 
-TEST(SwapIntegrity, FailedCommitRollsBackAndKeepsServing)
-{
+TEST(SwapIntegrity, FailedCommitRollsBackAndKeepsServing) {
     nvme_dev_cfg cfg;
     nvme_dev_cfg_default(&cfg);
     cfg.ns_lba_count = 4096;
@@ -89,8 +86,7 @@ TEST(SwapIntegrity, FailedCommitRollsBackAndKeepsServing)
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
     FirmwareUpdater updater(driver);
-    ASSERT_TRUE(updater.stage(2, FirmwareUpdater::build_image("FW9BAD0", 64 * 1024, 1), 4096)
-                    .ok());
+    ASSERT_TRUE(updater.stage(2, FirmwareUpdater::build_image("FW9BAD0", 64 * 1024, 1), 4096).ok());
     workload.set_activation_time(now_ns());
     CommitResult committed = updater.commit(2, CommitAction::ReplaceActivateImmediate);
     EXPECT_TRUE(committed.rolled_back);

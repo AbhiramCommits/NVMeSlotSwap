@@ -21,8 +21,7 @@ namespace nvme {
 
 namespace {
 
-uint64_t mix64(uint64_t x)
-{
+uint64_t mix64(uint64_t x) {
     x += 0x9E3779B97F4A7C15ull;
     x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
     x = (x ^ (x >> 27)) * 0x94D049BB133111EBull;
@@ -39,8 +38,7 @@ uint64_t mix64(uint64_t x)
 constexpr uint64_t kStride = 0x9E3779B97F4A7C15ull;
 constexpr size_t kWordsPerBlock = NVME_LBA_SIZE / 8;
 
-void fill_block(uint8_t *p, uint64_t lba, uint32_t seed)
-{
+void fill_block(uint8_t* p, uint64_t lba, uint32_t seed) {
     uint64_t v = mix64(lba ^ (static_cast<uint64_t>(seed) << 32));
     for (size_t i = 0; i < kWordsPerBlock; ++i) {
         std::memcpy(p + i * 8, &v, 8);
@@ -48,8 +46,7 @@ void fill_block(uint8_t *p, uint64_t lba, uint32_t seed)
     }
 }
 
-bool check_block(const uint8_t *p, uint64_t lba, uint32_t seed)
-{
+bool check_block(const uint8_t* p, uint64_t lba, uint32_t seed) {
     uint64_t v = mix64(lba ^ (static_cast<uint64_t>(seed) << 32));
     for (size_t i = 0; i < kWordsPerBlock; ++i) {
         uint64_t got;
@@ -65,11 +62,11 @@ bool check_block(const uint8_t *p, uint64_t lba, uint32_t seed)
 } // namespace
 
 struct Workload::Worker {
-    Workload *w = nullptr;
+    Workload* w = nullptr;
     unsigned qidx = 0;
     unsigned depth = 0;
     std::unique_ptr<DmaBufferPool> pool;
-    std::vector<DmaBuffer *> bufs;
+    std::vector<DmaBuffer*> bufs;
     std::vector<unsigned> free_slots;
     std::vector<uint64_t> slba;
     std::vector<uint64_t> submit_ns;
@@ -83,11 +80,10 @@ struct Workload::Worker {
 
     void run();
     bool submit_one(uint64_t deadline);
-    void complete(const Completion &c, uint64_t now);
+    void complete(const Completion& c, uint64_t now);
 };
 
-void Workload::Worker::complete(const Completion &c, uint64_t now)
-{
+void Workload::Worker::complete(const Completion& c, uint64_t now) {
     if (c.cid >= cid_slot.size()) {
         return;
     }
@@ -102,7 +98,7 @@ void Workload::Worker::complete(const Completion &c, uint64_t now)
     if (c.ok()) {
         w->completed_.fetch_add(1, std::memory_order_relaxed);
         if (!is_write[s]) {
-            const uint8_t *p = static_cast<const uint8_t *>(bufs[s]->ptr);
+            const uint8_t* p = static_cast<const uint8_t*>(bufs[s]->ptr);
             unsigned blocks = w->io_blocks_;
             for (unsigned b = 0; b < blocks; ++b) {
                 if (!check_block(p + b * NVME_LBA_SIZE, slba[s] + b, w->cfg_.seed)) {
@@ -129,8 +125,7 @@ void Workload::Worker::complete(const Completion &c, uint64_t now)
             now > prev_completion) {
             uint64_t gap = now - prev_completion;
             uint64_t best = w->activation_gap_ns_.load(std::memory_order_relaxed);
-            while (gap > best &&
-                   !w->activation_gap_ns_.compare_exchange_weak(best, gap)) {
+            while (gap > best && !w->activation_gap_ns_.compare_exchange_weak(best, gap)) {
             }
         }
     }
@@ -139,8 +134,7 @@ void Workload::Worker::complete(const Completion &c, uint64_t now)
     inflight.fetch_sub(1, std::memory_order_relaxed);
 }
 
-bool Workload::Worker::submit_one(uint64_t deadline)
-{
+bool Workload::Worker::submit_one(uint64_t deadline) {
     if (free_slots.empty() && !bufs.empty()) {
         return false;
     }
@@ -161,16 +155,16 @@ bool Workload::Worker::submit_one(uint64_t deadline)
         lba = w->ns_lbas_ - w->io_blocks_;
     }
 
-    DmaBuffer *buf = bufs[slot];
+    DmaBuffer* buf = bufs[slot];
     if (write) {
         for (unsigned b = 0; b < w->io_blocks_; ++b) {
-            fill_block(static_cast<uint8_t *>(buf->ptr) + b * NVME_LBA_SIZE, lba + b,
-                       w->cfg_.seed);
+            fill_block(static_cast<uint8_t*>(buf->ptr) + b * NVME_LBA_SIZE, lba + b, w->cfg_.seed);
         }
     }
 
-    CmdHandle h = write ? w->driver_.submit_write(qidx, lba, static_cast<uint16_t>(w->io_blocks_), *buf)
-                        : w->driver_.submit_read(qidx, lba, static_cast<uint16_t>(w->io_blocks_), *buf);
+    CmdHandle h =
+        write ? w->driver_.submit_write(qidx, lba, static_cast<uint16_t>(w->io_blocks_), *buf)
+              : w->driver_.submit_read(qidx, lba, static_cast<uint16_t>(w->io_blocks_), *buf);
     if (!h.ok) {
         w->eagain_.fetch_add(1, std::memory_order_relaxed);
         free_slots.push_back(slot);
@@ -187,8 +181,7 @@ bool Workload::Worker::submit_one(uint64_t deadline)
     return true;
 }
 
-void Workload::Worker::run()
-{
+void Workload::Worker::run() {
     const uint64_t deadline =
         w->started_ns_ + static_cast<uint64_t>(w->cfg_.seconds) * 1000000000ull;
     unsigned idle = 0;
@@ -249,9 +242,8 @@ void Workload::Worker::run()
     w->left_in_flight_.fetch_add(inflight.load(std::memory_order_relaxed));
 }
 
-Workload::Workload(NvmeDriver &driver, const WorkloadConfig &cfg)
-    : driver_(driver), cfg_(cfg), latency_(cfg.seed), window_latency_(cfg.seed ^ 0xA5A5u)
-{
+Workload::Workload(NvmeDriver& driver, const WorkloadConfig& cfg)
+    : driver_(driver), cfg_(cfg), latency_(cfg.seed), window_latency_(cfg.seed ^ 0xA5A5u) {
     IdentifyNs ns = driver_.identify_ns(1);
     if (ns.nsze < 4) {
         throw std::runtime_error("namespace is too small for a workload");
@@ -269,25 +261,22 @@ Workload::Workload(NvmeDriver &driver, const WorkloadConfig &cfg)
     }
 }
 
-Workload::~Workload()
-{
+Workload::~Workload() {
     try {
         stop();
     } catch (...) {
     }
 }
 
-void Workload::fill_buffer(DmaBuffer *buf, uint64_t slba) const
-{
+void Workload::fill_buffer(DmaBuffer* buf, uint64_t slba) const {
     for (unsigned b = 0; b < io_blocks_; ++b) {
-        fill_block(static_cast<uint8_t *>(buf->ptr) + b * NVME_LBA_SIZE, slba + b, cfg_.seed);
+        fill_block(static_cast<uint8_t*>(buf->ptr) + b * NVME_LBA_SIZE, slba + b, cfg_.seed);
     }
 }
 
-bool Workload::verify_buffer(const DmaBuffer *buf, uint64_t slba) const
-{
+bool Workload::verify_buffer(const DmaBuffer* buf, uint64_t slba) const {
     for (unsigned b = 0; b < io_blocks_; ++b) {
-        if (!check_block(static_cast<const uint8_t *>(buf->ptr) + b * NVME_LBA_SIZE, slba + b,
+        if (!check_block(static_cast<const uint8_t*>(buf->ptr) + b * NVME_LBA_SIZE, slba + b,
                          cfg_.seed)) {
             return false;
         }
@@ -295,15 +284,14 @@ bool Workload::verify_buffer(const DmaBuffer *buf, uint64_t slba) const
     return true;
 }
 
-void Workload::prefill()
-{
+void Workload::prefill() {
     const size_t kBatch = 16;
     DmaBufferPool pool(driver_.backend(), 2 * NVME_LBA_SIZE, kBatch);
-    std::deque<DmaBuffer *> pending;
-    std::vector<DmaBuffer *> idle;
+    std::deque<DmaBuffer*> pending;
+    std::vector<DmaBuffer*> idle;
     idle.reserve(kBatch);
     for (size_t i = 0; i < kBatch; ++i) {
-        DmaBuffer *b = pool.acquire();
+        DmaBuffer* b = pool.acquire();
         if (b != nullptr) {
             idle.push_back(b);
         }
@@ -318,10 +306,9 @@ void Workload::prefill()
     while (lba < ns_lbas_ || !pending.empty()) {
         bool submitted = false;
         while (!idle.empty() && lba < ns_lbas_ && pending.size() < max_outstanding) {
-            DmaBuffer *buf = idle.back();
+            DmaBuffer* buf = idle.back();
             idle.pop_back();
-            unsigned blocks =
-                static_cast<unsigned>(std::min<uint64_t>(io_blocks_, ns_lbas_ - lba));
+            unsigned blocks = static_cast<unsigned>(std::min<uint64_t>(io_blocks_, ns_lbas_ - lba));
             fill_buffer(buf, lba);
             CmdHandle h = driver_.submit_write(0, lba, static_cast<uint16_t>(blocks), *buf);
             if (!h.ok) {
@@ -349,7 +336,7 @@ void Workload::prefill()
     }
 
     /* Verify the first and last block pair. */
-    DmaBuffer *buf = idle.empty() ? nullptr : idle.back();
+    DmaBuffer* buf = idle.empty() ? nullptr : idle.back();
     if (buf != nullptr) {
         uint64_t first = 0;
         uint64_t last = ns_lbas_ - io_blocks_;
@@ -379,13 +366,12 @@ void Workload::prefill()
         }
         idle.push_back(buf);
     }
-    for (auto *b : idle) {
+    for (auto* b : idle) {
         pool.release(b);
     }
 }
 
-void Workload::start()
-{
+void Workload::start() {
     if (!workers_.empty()) {
         return;
     }
@@ -402,11 +388,11 @@ void Workload::start()
         worker->qidx = i;
         worker->depth = cfg_.depth;
         worker->rng = 0x9E3779B9u * (i + 1u) + cfg_.seed;
-        worker->pool = std::make_unique<DmaBufferPool>(driver_.backend(), 2 * NVME_LBA_SIZE,
-                                                       cfg_.depth);
+        worker->pool =
+            std::make_unique<DmaBufferPool>(driver_.backend(), 2 * NVME_LBA_SIZE, cfg_.depth);
         worker->bufs.reserve(cfg_.depth);
         for (unsigned s = 0; s < cfg_.depth; ++s) {
-            DmaBuffer *buf = worker->pool->acquire();
+            DmaBuffer* buf = worker->pool->acquire();
             if (buf == nullptr) {
                 throw std::runtime_error("unable to allocate workload buffers");
             }
@@ -421,20 +407,19 @@ void Workload::start()
         workers_.push_back(std::move(worker));
     }
 
-    for (auto &w : workers_) {
-        Worker *raw = w.get();
+    for (auto& w : workers_) {
+        Worker* raw = w.get();
         raw->thread = std::thread([raw] { raw->run(); });
     }
 }
 
-void Workload::pause()
-{
+void Workload::pause() {
     paused_.store(true, std::memory_order_release);
     const uint64_t deadline = now_ns() + 10000000000ull;
     for (;;) {
         uint64_t total = 0;
         bool all_parked = true;
-        for (auto &w : workers_) {
+        for (auto& w : workers_) {
             total += w->inflight.load(std::memory_order_relaxed);
             if (!w->parked.load(std::memory_order_acquire)) {
                 all_parked = false;
@@ -450,18 +435,16 @@ void Workload::pause()
     }
 }
 
-void Workload::resume()
-{
+void Workload::resume() {
     paused_.store(false, std::memory_order_release);
 }
 
-void Workload::stop()
-{
+void Workload::stop() {
     if (workers_.empty()) {
         return;
     }
     stop_.store(true, std::memory_order_release);
-    for (auto &w : workers_) {
+    for (auto& w : workers_) {
         if (w->thread.joinable()) {
             w->thread.join();
         }
@@ -469,16 +452,14 @@ void Workload::stop()
     stopped_ns_ = now_ns();
 }
 
-void Workload::set_activation_time(uint64_t ns)
-{
+void Workload::set_activation_time(uint64_t ns) {
     uint64_t half = static_cast<uint64_t>(cfg_.window_half_ms * 1000000.0);
     activation_ns_.store(ns, std::memory_order_release);
     window_start_ns_ = ns > half ? ns - half : 0;
     window_end_ns_ = ns + half;
 }
 
-WorkloadStats Workload::stats() const
-{
+WorkloadStats Workload::stats() const {
     WorkloadStats s;
     s.submitted = submitted_.load();
     s.completed = completed_.load();
@@ -503,13 +484,11 @@ WorkloadStats Workload::stats() const
     return s;
 }
 
-bool Workload::integrity_ok() const
-{
+bool Workload::integrity_ok() const {
     return integrity_errors_.load(std::memory_order_relaxed) == 0;
 }
 
-std::vector<double> Workload::latency_samples_us() const
-{
+std::vector<double> Workload::latency_samples_us() const {
     std::vector<uint64_t> raw = latency_.reservoir();
     std::vector<double> out;
     out.reserve(raw.size());
@@ -519,8 +498,7 @@ std::vector<double> Workload::latency_samples_us() const
     return out;
 }
 
-std::vector<double> Workload::window_samples_us() const
-{
+std::vector<double> Workload::window_samples_us() const {
     std::vector<uint64_t> raw = window_latency_.reservoir();
     std::vector<double> out;
     out.reserve(raw.size());

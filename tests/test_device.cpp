@@ -8,18 +8,15 @@
 
 namespace {
 
-uint64_t now_ns()
-{
+uint64_t now_ns() {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    return static_cast<uint64_t>(ts.tv_sec) * 1000000000ull +
-           static_cast<uint64_t>(ts.tv_nsec);
+    return static_cast<uint64_t>(ts.tv_sec) * 1000000000ull + static_cast<uint64_t>(ts.tv_nsec);
 }
 
 class DeviceTest : public ::testing::Test {
 protected:
-    void SetUp() override
-    {
+    void SetUp() override {
         nvme_dev_cfg_default(&cfg_);
         cfg_.ns_lba_count = 256;
         cfg_.max_qid = 4;
@@ -42,29 +39,25 @@ protected:
         std::memset(data_, 0, 4096);
     }
 
-    void TearDown() override
-    {
+    void TearDown() override {
         if (dev_ != nullptr) {
             nvme_dev_destroy(dev_);
         }
     }
 
-    void program_admin_registers()
-    {
+    void program_admin_registers() {
         nvme_mmio_write32(bar0_, NVME_REG_AQA, 31u | (31u << 16));
         nvme_mmio_write64(bar0_, NVME_REG_ASQ, asq_iova_);
         nvme_mmio_write64(bar0_, NVME_REG_ACQ, acq_iova_);
     }
 
-    bool enable(uint32_t timeout_ms = 3000)
-    {
-        nvme_mmio_write32(bar0_, NVME_REG_CC, NVME_CC_EN | (6u << NVME_CC_IOSQES_SHIFT) |
-                                                  (4u << NVME_CC_IOCQES_SHIFT));
+    bool enable(uint32_t timeout_ms = 3000) {
+        nvme_mmio_write32(bar0_, NVME_REG_CC,
+                          NVME_CC_EN | (6u << NVME_CC_IOSQES_SHIFT) | (4u << NVME_CC_IOCQES_SHIFT));
         return wait_ready(true, timeout_ms);
     }
 
-    bool wait_ready(bool want, uint32_t timeout_ms = 3000)
-    {
+    bool wait_ready(bool want, uint32_t timeout_ms = 3000) {
         uint64_t deadline = now_ns() + static_cast<uint64_t>(timeout_ms) * 1000000ull;
         while (true) {
             bool ready = (nvme_mmio_read32(bar0_, NVME_REG_CSTS) & NVME_CSTS_RDY) != 0;
@@ -77,21 +70,19 @@ protected:
         }
     }
 
-    bool submit_admin(const nvme_sqe &sqe)
-    {
+    bool submit_admin(const nvme_sqe& sqe) {
         if (sq_idx_ >= 32) {
             return false;
         }
-        std::memcpy(static_cast<char *>(asq_) + sq_idx_ * 64, &sqe, 64);
+        std::memcpy(static_cast<char*>(asq_) + sq_idx_ * 64, &sqe, 64);
         __atomic_thread_fence(__ATOMIC_RELEASE);
         nvme_dbl_write(bar0_, NVME_SQ_DBL(0, stride_), static_cast<uint32_t>(sq_idx_ + 1));
         sq_idx_++;
         return true;
     }
 
-    bool wait_cqe(uint32_t timeout_ms = 2000)
-    {
-        nvme_cqe *cq = static_cast<nvme_cqe *>(acq_);
+    bool wait_cqe(uint32_t timeout_ms = 2000) {
+        nvme_cqe* cq = static_cast<nvme_cqe*>(acq_);
         uint64_t deadline = now_ns() + static_cast<uint64_t>(timeout_ms) * 1000000ull;
         while ((__atomic_load_n(&cq[cq_idx_].status, __ATOMIC_ACQUIRE) & 1u) != 1u) {
             if (now_ns() > deadline) {
@@ -104,8 +95,7 @@ protected:
 
     unsigned last_sc() const { return nvme_cqe_sc(last_cqe_.status); }
 
-    nvme_sqe identify_sqe(uint64_t prp1, uint32_t cns, uint32_t nsid = 0) const
-    {
+    nvme_sqe identify_sqe(uint64_t prp1, uint32_t cns, uint32_t nsid = 0) const {
         nvme_sqe sqe;
         std::memset(&sqe, 0, sizeof(sqe));
         sqe.opc = NVME_ADMIN_IDENTIFY;
@@ -116,9 +106,8 @@ protected:
     }
 
     /* Creates one I/O queue pair and returns its qid. */
-    bool create_io_queue(uint16_t qid, uint16_t depth, void *sq, uint64_t sq_iova, void *cq,
-                         uint64_t cq_iova)
-    {
+    bool create_io_queue(uint16_t qid, uint16_t depth, void* sq, uint64_t sq_iova, void* cq,
+                         uint64_t cq_iova) {
         nvme_sqe cq_sqe;
         std::memset(&cq_sqe, 0, sizeof(cq_sqe));
         cq_sqe.opc = NVME_ADMIN_CREATE_CQ;
@@ -153,12 +142,12 @@ protected:
     }
 
     nvme_dev_cfg cfg_{};
-    nvme_dev_t *dev_ = nullptr;
-    volatile void *bar0_ = nullptr;
+    nvme_dev_t* dev_ = nullptr;
+    volatile void* bar0_ = nullptr;
     uint32_t stride_ = 4;
-    void *asq_ = nullptr;
-    void *acq_ = nullptr;
-    void *data_ = nullptr;
+    void* asq_ = nullptr;
+    void* acq_ = nullptr;
+    void* data_ = nullptr;
     uint64_t asq_iova_ = 0;
     uint64_t acq_iova_ = 0;
     uint64_t data_iova_ = 0;
@@ -167,8 +156,7 @@ protected:
     nvme_cqe last_cqe_{};
 };
 
-TEST_F(DeviceTest, EnableResetReenableSequence)
-{
+TEST_F(DeviceTest, EnableResetReenableSequence) {
     program_admin_registers();
     ASSERT_TRUE(enable());
     EXPECT_TRUE((nvme_mmio_read32(bar0_, NVME_REG_CSTS) & NVME_CSTS_RDY) != 0);
@@ -185,8 +173,7 @@ TEST_F(DeviceTest, EnableResetReenableSequence)
     EXPECT_EQ(2u, nvme_dev_ready_count(dev_));
 }
 
-TEST_F(DeviceTest, AdminCommandRejectedBeforeReady)
-{
+TEST_F(DeviceTest, AdminCommandRejectedBeforeReady) {
     program_admin_registers();
     /* No CC.EN yet.  The controller must complete the command with
      * INVALID_FIELD instead of executing it. */
@@ -198,8 +185,7 @@ TEST_F(DeviceTest, AdminCommandRejectedBeforeReady)
     EXPECT_EQ(77, last_cqe_.cid);
 }
 
-TEST_F(DeviceTest, IdentifyControllerAndNamespace)
-{
+TEST_F(DeviceTest, IdentifyControllerAndNamespace) {
     program_admin_registers();
     ASSERT_TRUE(enable());
 
@@ -227,23 +213,22 @@ TEST_F(DeviceTest, IdentifyControllerAndNamespace)
     cq_idx_++;
 }
 
-TEST_F(DeviceTest, Prp2AndPrpListTransfers)
-{
+TEST_F(DeviceTest, Prp2AndPrpListTransfers) {
     program_admin_registers();
     ASSERT_TRUE(enable());
 
     const uint16_t depth = 8;
     uint64_t sq_iova = 0, cq_iova = 0;
     uint64_t p1i = 0, p2i = 0, p3i = 0, r1i = 0, r2i = 0, r3i = 0, listi = 0;
-    void *sq = nvme_dev_dma_map(dev_, depth * 64, &sq_iova);
-    void *cq = nvme_dev_dma_map(dev_, depth * 16, &cq_iova);
-    void *p1 = nvme_dev_dma_map(dev_, 4096, &p1i);
-    void *p2 = nvme_dev_dma_map(dev_, 4096, &p2i);
-    void *p3 = nvme_dev_dma_map(dev_, 4096, &p3i);
-    void *r1 = nvme_dev_dma_map(dev_, 4096, &r1i);
-    void *r2 = nvme_dev_dma_map(dev_, 4096, &r2i);
-    void *r3 = nvme_dev_dma_map(dev_, 4096, &r3i);
-    void *list = nvme_dev_dma_map(dev_, 4096, &listi);
+    void* sq = nvme_dev_dma_map(dev_, depth * 64, &sq_iova);
+    void* cq = nvme_dev_dma_map(dev_, depth * 16, &cq_iova);
+    void* p1 = nvme_dev_dma_map(dev_, 4096, &p1i);
+    void* p2 = nvme_dev_dma_map(dev_, 4096, &p2i);
+    void* p3 = nvme_dev_dma_map(dev_, 4096, &p3i);
+    void* r1 = nvme_dev_dma_map(dev_, 4096, &r1i);
+    void* r2 = nvme_dev_dma_map(dev_, 4096, &r2i);
+    void* r3 = nvme_dev_dma_map(dev_, 4096, &r3i);
+    void* list = nvme_dev_dma_map(dev_, 4096, &listi);
     ASSERT_NE(sq, nullptr);
     ASSERT_NE(cq, nullptr);
     ASSERT_NE(list, nullptr);
@@ -254,12 +239,12 @@ TEST_F(DeviceTest, Prp2AndPrpListTransfers)
     ASSERT_TRUE(create_io_queue(1, depth, sq, sq_iova, cq, cq_iova));
 
     for (int i = 0; i < 4096; ++i) {
-        static_cast<uint8_t *>(p1)[i] = static_cast<uint8_t>(i * 3);
-        static_cast<uint8_t *>(p2)[i] = static_cast<uint8_t>(i * 5 + 1);
-        static_cast<uint8_t *>(p3)[i] = static_cast<uint8_t>(i * 7 + 2);
+        static_cast<uint8_t*>(p1)[i] = static_cast<uint8_t>(i * 3);
+        static_cast<uint8_t*>(p2)[i] = static_cast<uint8_t>(i * 5 + 1);
+        static_cast<uint8_t*>(p3)[i] = static_cast<uint8_t>(i * 7 + 2);
     }
 
-    nvme_cqe *io_cq = static_cast<nvme_cqe *>(cq);
+    nvme_cqe* io_cq = static_cast<nvme_cqe*>(cq);
     auto io_sqe = [](uint8_t opc, uint64_t slba, uint16_t nlb, uint64_t prp1, uint64_t prp2) {
         nvme_sqe s;
         std::memset(&s, 0, sizeof(s));
@@ -272,8 +257,8 @@ TEST_F(DeviceTest, Prp2AndPrpListTransfers)
         s.cdw12 = nlb - 1u;
         return s;
     };
-    auto ring_io = [&](uint16_t slot, const nvme_sqe &s) {
-        std::memcpy(static_cast<char *>(sq) + slot * 64, &s, 64);
+    auto ring_io = [&](uint16_t slot, const nvme_sqe& s) {
+        std::memcpy(static_cast<char*>(sq) + slot * 64, &s, 64);
         __atomic_thread_fence(__ATOMIC_RELEASE);
         nvme_dbl_write(bar0_, NVME_SQ_DBL(1, stride_), slot + 1u);
     };
@@ -299,14 +284,14 @@ TEST_F(DeviceTest, Prp2AndPrpListTransfers)
     EXPECT_EQ(0, std::memcmp(p2, r2, 4096));
 
     /* Three pages: PRP2 points at a PRP list. */
-    static_cast<uint64_t *>(list)[0] = p2i;
-    static_cast<uint64_t *>(list)[1] = p3i;
+    static_cast<uint64_t*>(list)[0] = p2i;
+    static_cast<uint64_t*>(list)[1] = p3i;
     ring_io(2, io_sqe(NVME_IO_WRITE, 8, 3, p1i, listi));
     ASSERT_TRUE(wait_io(2));
     ASSERT_EQ(0u, nvme_cqe_sc(io_cq[2].status));
 
-    static_cast<uint64_t *>(list)[0] = r2i;
-    static_cast<uint64_t *>(list)[1] = r3i;
+    static_cast<uint64_t*>(list)[0] = r2i;
+    static_cast<uint64_t*>(list)[1] = r3i;
     ring_io(3, io_sqe(NVME_IO_READ, 8, 3, r1i, listi));
     ASSERT_TRUE(wait_io(3));
     ASSERT_EQ(0u, nvme_cqe_sc(io_cq[3].status));

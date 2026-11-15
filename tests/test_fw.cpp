@@ -14,9 +14,8 @@ namespace nvme {
 
 namespace {
 
-bool wait_for_completion(NvmeDriver &driver, unsigned q, Completion *out,
-                         uint32_t timeout_ms = 2000)
-{
+bool wait_for_completion(NvmeDriver& driver, unsigned q, Completion* out,
+                         uint32_t timeout_ms = 2000) {
     uint64_t deadline = now_ns() + static_cast<uint64_t>(timeout_ms) * 1000000ull;
     while (now_ns() < deadline) {
         auto c = driver.poll(q);
@@ -33,8 +32,7 @@ bool wait_for_completion(NvmeDriver &driver, unsigned q, Completion *out,
 
 class FwTest : public ::testing::Test {
 protected:
-    void SetUp() override
-    {
+    void SetUp() override {
         nvme_dev_cfg_default(&cfg_);
         cfg_.ns_lba_count = 1024;
         cfg_.max_qid = 4;
@@ -45,15 +43,12 @@ protected:
         updater_ = std::make_unique<FirmwareUpdater>(*driver_);
     }
 
-    void reset_controller()
-    {
+    void reset_controller() {
         driver_->controller_reset();
         driver_->reset_and_enable();
     }
 
-    void stage(unsigned slot, const std::string &rev, size_t size = 65536,
-               size_t chunk = 4096)
-    {
+    void stage(unsigned slot, const std::string& rev, size_t size = 65536, size_t chunk = 4096) {
         std::vector<uint8_t> image = FirmwareUpdater::build_image(rev, size, 0xF00Du + slot);
         StageResult r = updater_->stage(slot, image, chunk);
         ASSERT_TRUE(r.ok()) << "stage failed with status " << r.status;
@@ -65,8 +60,7 @@ protected:
     std::unique_ptr<FirmwareUpdater> updater_;
 };
 
-TEST_F(FwTest, ChunkedDownloadReassemblesImage)
-{
+TEST_F(FwTest, ChunkedDownloadReassemblesImage) {
     std::vector<uint8_t> image = FirmwareUpdater::build_image("FW2.0.1", 256 * 1024, 9);
     StageResult r = updater_->stage(2, image, 4096);
     ASSERT_TRUE(r.ok());
@@ -88,8 +82,7 @@ TEST_F(FwTest, ChunkedDownloadReassemblesImage)
     EXPECT_EQ("FW3.0.0", log.revisions[2]);
 }
 
-TEST_F(FwTest, BadMagicIsRejectedAndActiveSlotUntouched)
-{
+TEST_F(FwTest, BadMagicIsRejectedAndActiveSlotUntouched) {
     std::vector<uint8_t> image = FirmwareUpdater::build_image("FW2.0.1", 8192, 3);
     image[0] = 'X'; /* corrupt the 'NVFW' magic */
     ASSERT_TRUE(updater_->stage(2, image, 4096).ok());
@@ -102,8 +95,7 @@ TEST_F(FwTest, BadMagicIsRejectedAndActiveSlotUntouched)
     EXPECT_EQ("", log.revisions[1]);
 }
 
-TEST_F(FwTest, CorruptedPayloadIsRejectedAndActiveSlotUntouched)
-{
+TEST_F(FwTest, CorruptedPayloadIsRejectedAndActiveSlotUntouched) {
     std::vector<uint8_t> image = FirmwareUpdater::build_image("FW2.0.1", 16384, 4);
     image.back() ^= 0xFF; /* payload bit flip after the SHA-256 was computed */
     ASSERT_TRUE(updater_->stage(2, image, 4096).ok());
@@ -115,8 +107,7 @@ TEST_F(FwTest, CorruptedPayloadIsRejectedAndActiveSlotUntouched)
     EXPECT_EQ("", log.revisions[1]);
 }
 
-TEST_F(FwTest, CommitActionMatrix)
-{
+TEST_F(FwTest, CommitActionMatrix) {
     /* CA=0: replace the slot, do not activate. */
     stage(2, "FW2.0.0");
     CommitResult c0 = updater_->commit(2, CommitAction::Replace);
@@ -164,8 +155,7 @@ TEST_F(FwTest, CommitActionMatrix)
     EXPECT_TRUE(updater_->verify_activation("FW5.0.0"));
 }
 
-TEST_F(FwTest, SlotOneIsReadOnly)
-{
+TEST_F(FwTest, SlotOneIsReadOnly) {
     stage(1, "FW9.0.0");
     CommitResult c = updater_->commit(1, CommitAction::ReplaceActivateImmediate);
     EXPECT_EQ(NVME_SC_FW_ACTIVATION_PROHIBITED, c.status);
@@ -174,14 +164,12 @@ TEST_F(FwTest, SlotOneIsReadOnly)
     EXPECT_EQ("FW1.0.0", log.revisions[0]);
 }
 
-TEST_F(FwTest, ActivateEmptySlotFails)
-{
+TEST_F(FwTest, ActivateEmptySlotFails) {
     CommitResult c = updater_->commit(6, CommitAction::Activate);
     EXPECT_EQ(NVME_SC_FW_SLOT_INVALID, c.status);
 }
 
-TEST_F(FwTest, FailedSelfTestRollsBackToPreviousSlot)
-{
+TEST_F(FwTest, FailedSelfTestRollsBackToPreviousSlot) {
     stage(2, "FW2.0.0");
     ASSERT_EQ(0, updater_->commit(2, CommitAction::ReplaceActivateImmediate).status);
     ASSERT_EQ("FW2.0.0", updater_->active_revision());
@@ -198,8 +186,7 @@ TEST_F(FwTest, FailedSelfTestRollsBackToPreviousSlot)
     EXPECT_EQ("FW3BAD0", log.revisions[2]);
 }
 
-TEST_F(FwTest, InjectedSelfTestFailureAlsoRollsBack)
-{
+TEST_F(FwTest, InjectedSelfTestFailureAlsoRollsBack) {
     stage(2, "FW2.0.0");
     ASSERT_EQ(0, updater_->commit(2, CommitAction::ReplaceActivateImmediate).status);
     stage(3, "FW3.0.0");
@@ -209,12 +196,11 @@ TEST_F(FwTest, InjectedSelfTestFailureAlsoRollsBack)
     EXPECT_EQ("FW2.0.0", updater_->active_revision());
 }
 
-TEST_F(FwTest, NamespaceStaysReadableAcrossRollback)
-{
+TEST_F(FwTest, NamespaceStaysReadableAcrossRollback) {
     driver_->create_io_queues(1, 8);
     DmaBufferPool pool(*backend_, 2 * NVME_LBA_SIZE, 2);
-    DmaBuffer *w = pool.acquire();
-    DmaBuffer *r = pool.acquire();
+    DmaBuffer* w = pool.acquire();
+    DmaBuffer* r = pool.acquire();
     ASSERT_NE(w, nullptr);
     ASSERT_NE(r, nullptr);
     std::memset(w->ptr, 0x5A, 2 * NVME_LBA_SIZE);

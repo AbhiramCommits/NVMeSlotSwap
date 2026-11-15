@@ -76,7 +76,7 @@ struct LatencySummary {
     double max_gap_us = 0.0;
 };
 
-LatencySummary summarize(const LatencyRecorder &rec);
+LatencySummary summarize(const LatencyRecorder& rec);
 
 } // namespace nvme
 

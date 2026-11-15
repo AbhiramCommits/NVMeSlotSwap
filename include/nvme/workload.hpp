@@ -55,11 +55,11 @@ class Workload {
 public:
     struct Worker;
 
-    Workload(NvmeDriver &driver, const WorkloadConfig &cfg);
+    Workload(NvmeDriver& driver, const WorkloadConfig& cfg);
     ~Workload();
 
-    Workload(const Workload &) = delete;
-    Workload &operator=(const Workload &) = delete;
+    Workload(const Workload&) = delete;
+    Workload& operator=(const Workload&) = delete;
 
     /* Writes the integrity pattern over the whole namespace through the
      * driver, then verifies a sample by reading it back. */
@@ -78,17 +78,17 @@ public:
     bool integrity_ok() const;
 
     uint64_t namespace_lbas() const { return ns_lbas_; }
-    const WorkloadConfig &config() const { return cfg_; }
+    const WorkloadConfig& config() const { return cfg_; }
 
     /* Up to 4096 raw latency samples (microseconds) from the reservoir. */
     std::vector<double> latency_samples_us() const;
     std::vector<double> window_samples_us() const;
 
 private:
-    void fill_buffer(DmaBuffer *buf, uint64_t slba) const;
-    bool verify_buffer(const DmaBuffer *buf, uint64_t slba) const;
+    void fill_buffer(DmaBuffer* buf, uint64_t slba) const;
+    bool verify_buffer(const DmaBuffer* buf, uint64_t slba) const;
 
-    NvmeDriver &driver_;
+    NvmeDriver& driver_;
     WorkloadConfig cfg_;
     uint64_t ns_lbas_ = 0;
     uint16_t io_blocks_ = 2;

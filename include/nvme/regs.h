@@ -92,50 +92,42 @@ extern "C" {
  * registers on real hardware and reading them can raise a fatal error in
  * some controllers.  Only the device model polls them.
  */
-static inline uint32_t nvme_mmio_read32(const volatile void *bar0, uint32_t off)
-{
-    const uint32_t *p = (const uint32_t *)((const volatile char *)bar0 + off);
+static inline uint32_t nvme_mmio_read32(const volatile void* bar0, uint32_t off) {
+    const uint32_t* p = (const uint32_t*)((const volatile char*)bar0 + off);
     return __atomic_load_n(p, __ATOMIC_ACQUIRE);
 }
 
-static inline void nvme_mmio_write32(volatile void *bar0, uint32_t off, uint32_t val)
-{
-    uint32_t *p = (uint32_t *)((volatile char *)bar0 + off);
+static inline void nvme_mmio_write32(volatile void* bar0, uint32_t off, uint32_t val) {
+    uint32_t* p = (uint32_t*)((volatile char*)bar0 + off);
     __atomic_store_n(p, val, __ATOMIC_RELEASE);
 }
 
-static inline uint64_t nvme_mmio_read64(const volatile void *bar0, uint32_t off)
-{
-    const uint64_t *p = (const uint64_t *)((const volatile char *)bar0 + off);
+static inline uint64_t nvme_mmio_read64(const volatile void* bar0, uint32_t off) {
+    const uint64_t* p = (const uint64_t*)((const volatile char*)bar0 + off);
     return __atomic_load_n(p, __ATOMIC_ACQUIRE);
 }
 
-static inline void nvme_mmio_write64(volatile void *bar0, uint32_t off, uint64_t val)
-{
-    uint64_t *p = (uint64_t *)((volatile char *)bar0 + off);
+static inline void nvme_mmio_write64(volatile void* bar0, uint32_t off, uint64_t val) {
+    uint64_t* p = (uint64_t*)((volatile char*)bar0 + off);
     __atomic_store_n(p, val, __ATOMIC_RELEASE);
 }
 
 /* Doorbell helpers.  The store must follow a release fence (see queue.c). */
-static inline void nvme_dbl_write(volatile void *bar0, uint32_t off, uint32_t val)
-{
-    uint32_t *p = (uint32_t *)((volatile char *)bar0 + off);
+static inline void nvme_dbl_write(volatile void* bar0, uint32_t off, uint32_t val) {
+    uint32_t* p = (uint32_t*)((volatile char*)bar0 + off);
     __atomic_store_n(p, val, __ATOMIC_RELEASE);
 }
 
-static inline uint32_t nvme_dbl_read(const volatile void *bar0, uint32_t off)
-{
-    const uint32_t *p = (const uint32_t *)((const volatile char *)bar0 + off);
+static inline uint32_t nvme_dbl_read(const volatile void* bar0, uint32_t off) {
+    const uint32_t* p = (const uint32_t*)((const volatile char*)bar0 + off);
     return __atomic_load_n(p, __ATOMIC_ACQUIRE);
 }
 
 /* CAP decoding helpers. */
-static inline uint32_t nvme_cap_dstrd(uint64_t cap)
-{
+static inline uint32_t nvme_cap_dstrd(uint64_t cap) {
     return (uint32_t)((cap >> NVME_CAP_DSTRD_SHIFT) & NVME_CAP_DSTRD_MASK);
 }
-static inline uint32_t nvme_cap_mqes(uint64_t cap)
-{
+static inline uint32_t nvme_cap_mqes(uint64_t cap) {
     return (uint32_t)((cap >> NVME_CAP_MQES_SHIFT) & NVME_CAP_MQES_MASK);
 }
 

@@ -26,29 +26,34 @@
 
 namespace {
 
-void print_usage(FILE *out)
-{
-    std::fprintf(out,
-                 "NVMeSlotSwap - non-disruptive dual-image NVMe firmware activation\n"
-                 "\n"
-                 "Usage: nvmeslotswap <command> [options]\n"
-                 "\n"
-                 "Commands:\n"
-                 "  info                 Show the emulated controller summary\n"
-                 "  ident                Identify Controller / Identify Namespace\n"
-                 "  io [options]         Run a smoke I/O workload\n"
-                 "                         --queues N --depth N --seconds N --rw PCT\n"
-                 "  fw list              Read the Firmware Slot Information log (0x03)\n"
-                 "  fw stage             Download a firmware image in 4 KiB chunks\n"
-                 "                         --slot N --rev STR --size BYTES\n"
-                 "  fw commit            Commit a staged image\n"
-                 "                         --slot N --action 0|1|2|3 [--fail-commit]\n"
-                 "  swap-test [options]  Continuous I/O across activation, JSON result\n"
-                 "                         --queues N --depth N --warmup-ms N --post-ms N\n"
-                 "                         --action 0|1|2|3|none --rw PCT\n"
-                 "                         [--json PATH] [--fail-commit]\n"
-                 "                         [--slot N] [--rev STR] [--size BYTES]\n"
-                 "  --help               Show this help\n");
+void print_usage(FILE* out) {
+    std::fprintf(out, "NVMeSlotSwap - non-disruptive dual-image NVMe firmware activation\n"
+                      "\n"
+                      "Usage: nvmeslotswap <command> [options]\n"
+                      "\n"
+                      "Commands:\n"
+                      "  info                 Show the emulated controller summary\n"
+                      "  ident                Identify Controller / Identify Namespace\n"
+                      "  io [options]         Run a smoke I/O workload\n"
+                      "                         --queues N --depth N --seconds N --rw PCT\n"
+                      "  fw list              Read the Firmware Slot Information log (0x03)\n"
+                      "  fw stage             Download a firmware image in 4 KiB chunks\n"
+                      "                         --slot N --rev STR --size BYTES\n"
+                      "  fw commit            Commit a staged image\n"
+                      "                         --slot N --action 0|1|2|3 [--fail-commit]\n"
+                      "  swap-test [options]  Continuous I/O across activation, JSON result\n"
+                      "                         --queues N --depth N --warmup-ms N --post-ms N\n"
+                      "                         --action 0|1|2|3|none --rw PCT\n"
+                      "                         [--json PATH] [--fail-commit]\n"
+                      "                         [--slot N] [--rev STR] [--size BYTES]\n"
+                      "  --help               Show this help\n"
+#ifdef NVMESS_BACKEND_VFIO
+                      "\n"
+                      "VFIO (Linux, -DNVMESS_BACKEND_VFIO=ON builds only):\n"
+                      "  vfio-probe --vfio-device 0000:01:00.0 --vfio-group /dev/vfio/12\n"
+                      "               Map BAR0 through VFIO and print CAP/VS/CSTS.\n"
+#endif
+    );
 }
 
 struct Options {
@@ -64,6 +69,8 @@ struct Options {
     size_t size = 1024 * 1024;
     std::string json_path;
     std::string state_path;
+    std::string vfio_group;
+    std::string vfio_device;
     bool fail_commit = false;
     bool reset_after_commit = false;
     unsigned seed = 12345;
@@ -71,11 +78,10 @@ struct Options {
     bool samples = false;
 };
 
-bool parse_opts(int argc, char **argv, Options &o, int start)
-{
+bool parse_opts(int argc, char** argv, Options& o, int start) {
     for (int i = start; i < argc; ++i) {
         std::string a = argv[i];
-        auto need = [&](const char *name) -> const char * {
+        auto need = [&](const char* name) -> const char* {
             if (i + 1 >= argc) {
                 std::fprintf(stderr, "nvmeslotswap: %s needs a value\n", name);
                 return nullptr;
@@ -83,71 +89,95 @@ bool parse_opts(int argc, char **argv, Options &o, int start)
             return argv[++i];
         };
         if (a == "--queues") {
-            const char *v = need("--queues");
-            if (!v) return false;
+            const char* v = need("--queues");
+            if (!v)
+                return false;
             o.queues = static_cast<unsigned>(std::strtoul(v, nullptr, 10));
         } else if (a == "--depth") {
-            const char *v = need("--depth");
-            if (!v) return false;
+            const char* v = need("--depth");
+            if (!v)
+                return false;
             o.depth = static_cast<unsigned>(std::strtoul(v, nullptr, 10));
         } else if (a == "--seconds") {
-            const char *v = need("--seconds");
-            if (!v) return false;
+            const char* v = need("--seconds");
+            if (!v)
+                return false;
             o.seconds = static_cast<unsigned>(std::strtoul(v, nullptr, 10));
         } else if (a == "--rw") {
-            const char *v = need("--rw");
-            if (!v) return false;
+            const char* v = need("--rw");
+            if (!v)
+                return false;
             o.rw = static_cast<unsigned>(std::strtoul(v, nullptr, 10));
         } else if (a == "--warmup-ms") {
-            const char *v = need("--warmup-ms");
-            if (!v) return false;
+            const char* v = need("--warmup-ms");
+            if (!v)
+                return false;
             o.warmup_ms = static_cast<unsigned>(std::strtoul(v, nullptr, 10));
         } else if (a == "--post-ms") {
-            const char *v = need("--post-ms");
-            if (!v) return false;
+            const char* v = need("--post-ms");
+            if (!v)
+                return false;
             o.post_ms = static_cast<unsigned>(std::strtoul(v, nullptr, 10));
         } else if (a == "--action") {
-            const char *v = need("--action");
-            if (!v) return false;
+            const char* v = need("--action");
+            if (!v)
+                return false;
             if (std::strcmp(v, "none") == 0) {
                 o.action = -1;
             } else {
                 o.action = static_cast<int>(std::strtol(v, nullptr, 10));
             }
         } else if (a == "--slot") {
-            const char *v = need("--slot");
-            if (!v) return false;
+            const char* v = need("--slot");
+            if (!v)
+                return false;
             o.slot = static_cast<unsigned>(std::strtoul(v, nullptr, 10));
         } else if (a == "--rev") {
-            const char *v = need("--rev");
-            if (!v) return false;
+            const char* v = need("--rev");
+            if (!v)
+                return false;
             o.rev = v;
         } else if (a == "--size") {
-            const char *v = need("--size");
-            if (!v) return false;
+            const char* v = need("--size");
+            if (!v)
+                return false;
             o.size = static_cast<size_t>(std::strtoull(v, nullptr, 10));
         } else if (a == "--json") {
-            const char *v = need("--json");
-            if (!v) return false;
+            const char* v = need("--json");
+            if (!v)
+                return false;
             o.json_path = v;
         } else if (a == "--state") {
-            const char *v = need("--state");
-            if (!v) return false;
+            const char* v = need("--state");
+            if (!v)
+                return false;
             o.state_path = v;
         } else if (a == "--fail-commit") {
             o.fail_commit = true;
         } else if (a == "--reset") {
             o.reset_after_commit = true;
         } else if (a == "--seed") {
-            const char *v = need("--seed");
-            if (!v) return false;
+            const char* v = need("--seed");
+            if (!v)
+                return false;
             o.seed = static_cast<unsigned>(std::strtoul(v, nullptr, 10));
         } else if (a == "--stall-us") {
-            const char *v = need("--stall-us");
-            if (!v) return false;
+            const char* v = need("--stall-us");
+            if (!v)
+                return false;
             o.stall_us = static_cast<unsigned>(std::strtoul(v, nullptr, 10));
         } else if (a == "--samples") {
             o.samples = true;
+        } else if (a == "--vfio-group") {
+            const char* v = need("--vfio-group");
+            if (!v)
+                return false;
+            o.vfio_group = v;
+        } else if (a == "--vfio-device") {
+            const char* v = need("--vfio-device");
+            if (!v)
+                return false;
+            o.vfio_device = v;
         } else {
             std::fprintf(stderr, "nvmeslotswap: unknown option %s\n", a.c_str());
             return false;
@@ -156,15 +186,13 @@ bool parse_opts(int argc, char **argv, Options &o, int start)
     return true;
 }
 
-nvme_dev_cfg default_cfg()
-{
+nvme_dev_cfg default_cfg() {
     nvme_dev_cfg cfg;
     nvme_dev_cfg_default(&cfg);
     return cfg;
 }
 
-int cmd_info()
-{
+int cmd_info() {
     nvme::SimBackend backend(default_cfg());
     nvme::NvmeDriver drv(backend);
     drv.reset_and_enable();
@@ -176,8 +204,7 @@ int cmd_info()
     return 0;
 }
 
-int cmd_ident()
-{
+int cmd_ident() {
     nvme::SimBackend backend(default_cfg());
     nvme::NvmeDriver drv(backend);
     drv.reset_and_enable();
@@ -199,13 +226,11 @@ int cmd_ident()
 /* ------------------------------------------------------------------ */
 /* Firmware update commands                                            */
 /* ------------------------------------------------------------------ */
-std::string state_path(const Options &o)
-{
+std::string state_path(const Options& o) {
     return o.state_path.empty() ? std::string(".nvmess/fw.state") : o.state_path;
 }
 
-void ensure_parent_dir(const std::string &path)
-{
+void ensure_parent_dir(const std::string& path) {
     size_t pos = path.find_last_of('/');
     if (pos == std::string::npos || pos == 0) {
         return;
@@ -214,8 +239,7 @@ void ensure_parent_dir(const std::string &path)
     (void)mkdir(dir.c_str(), 0755);
 }
 
-void fill_ns_pattern(uint8_t *p, size_t len, uint64_t lba)
-{
+void fill_ns_pattern(uint8_t* p, size_t len, uint64_t lba) {
     for (size_t i = 0; i + 8 <= len; i += 8) {
         uint64_t v = 0x4E564D45534C4F54ull ^ (lba * 0x9E3779B97F4A7C15ull) ^
                      (static_cast<uint64_t>(i / 8) * 0xBF58476D1CE4E5B9ull);
@@ -223,8 +247,7 @@ void fill_ns_pattern(uint8_t *p, size_t len, uint64_t lba)
     }
 }
 
-bool wait_one(nvme::NvmeDriver &drv, unsigned q, unsigned *sc)
-{
+bool wait_one(nvme::NvmeDriver& drv, unsigned q, unsigned* sc) {
     uint64_t deadline = nvme::now_ns() + 2000000000ull;
     while (nvme::now_ns() < deadline) {
         auto c = drv.poll(q);
@@ -239,9 +262,8 @@ bool wait_one(nvme::NvmeDriver &drv, unsigned q, unsigned *sc)
 
 /* Writes a deterministic pattern to two LBAs before activation and reads it
  * back afterwards, proving the namespace stayed readable across the commit. */
-bool namespace_roundtrip(nvme::NvmeDriver &drv, bool write_phase, uint8_t *wbuf, uint8_t *rbuf,
-                         const nvme::DmaBuffer &wa, const nvme::DmaBuffer &ra)
-{
+bool namespace_roundtrip(nvme::NvmeDriver& drv, bool write_phase, uint8_t* wbuf, uint8_t* rbuf,
+                         const nvme::DmaBuffer& wa, const nvme::DmaBuffer& ra) {
     unsigned sc = 0;
     if (write_phase) {
         fill_ns_pattern(wbuf, 2 * NVME_LBA_SIZE, 16);
@@ -259,10 +281,8 @@ bool namespace_roundtrip(nvme::NvmeDriver &drv, bool write_phase, uint8_t *wbuf,
     return std::memcmp(expect, rbuf, sizeof(expect)) == 0;
 }
 
-void print_slots(const nvme::FwSlotInfo &info)
-{
-    std::printf("active slot: %u   next activation slot: %u\n", info.active_slot,
-                info.next_slot);
+void print_slots(const nvme::FwSlotInfo& info) {
+    std::printf("active slot: %u   next activation slot: %u\n", info.active_slot, info.next_slot);
     for (unsigned i = 0; i < 7; ++i) {
         std::string rev = info.revisions[i];
         bool active = (info.active_slot == i + 1);
@@ -286,8 +306,7 @@ void print_slots(const nvme::FwSlotInfo &info)
     }
 }
 
-const char *commit_action_name(int action)
-{
+const char* commit_action_name(int action) {
     switch (action) {
     case 0:
         return "CA=0 replace slot, no activation";
@@ -302,8 +321,7 @@ const char *commit_action_name(int action)
     }
 }
 
-int cmd_fw(int argc, char **argv, const Options &o)
-{
+int cmd_fw(int argc, char** argv, const Options& o) {
     if (argc < 3) {
         std::fprintf(stderr, "nvmeslotswap: fw needs one of: list, stage, commit\n");
         return 2;
@@ -333,8 +351,8 @@ int cmd_fw(int argc, char **argv, const Options &o)
             nvme::FirmwareUpdater::build_image(o.rev, o.size, 0x5EEDu + o.slot);
         nvme::StageResult r = upd.stage(o.slot, image, 4096);
         if (!r.ok()) {
-            std::fprintf(stderr, "stage failed with status 0x%02x (image is %zu bytes)\n",
-                         r.status, r.bytes);
+            std::fprintf(stderr, "stage failed with status 0x%02x (image is %zu bytes)\n", r.status,
+                         r.bytes);
             return 1;
         }
         ensure_parent_dir(path);
@@ -358,8 +376,8 @@ int cmd_fw(int argc, char **argv, const Options &o)
         /* Establish I/O and write a known pattern before the commit. */
         drv.create_io_queues(1, 8);
         nvme::DmaBufferPool pool(backend, 2 * NVME_LBA_SIZE, 2);
-        nvme::DmaBuffer *wa = pool.acquire();
-        nvme::DmaBuffer *ra = pool.acquire();
+        nvme::DmaBuffer* wa = pool.acquire();
+        nvme::DmaBuffer* ra = pool.acquire();
         std::vector<uint8_t> wbuf(2 * NVME_LBA_SIZE), rbuf(2 * NVME_LBA_SIZE);
         bool wrote = namespace_roundtrip(drv, true, wbuf.data(), rbuf.data(), *wa, *ra);
 
@@ -409,28 +427,27 @@ int cmd_fw(int argc, char **argv, const Options &o)
 }
 
 struct SmokeCtx {
-    nvme::NvmeDriver *drv = nullptr;
-    nvme::DmaBufferPool *pool = nullptr;
+    nvme::NvmeDriver* drv = nullptr;
+    nvme::DmaBufferPool* pool = nullptr;
     unsigned queue = 0;
     unsigned depth = 32;
     double read_ratio = 0.7;
     uint64_t deadline_ns = 0;
     uint64_t ns_lbas = 0;
     unsigned seed = 1;
-    std::atomic<uint64_t> *submitted = nullptr;
-    std::atomic<uint64_t> *completed = nullptr;
-    std::atomic<uint64_t> *failed = nullptr;
-    std::atomic<uint64_t> *stalls = nullptr;
-    std::atomic<bool> *panic = nullptr;
+    std::atomic<uint64_t>* submitted = nullptr;
+    std::atomic<uint64_t>* completed = nullptr;
+    std::atomic<uint64_t>* failed = nullptr;
+    std::atomic<uint64_t>* stalls = nullptr;
+    std::atomic<bool>* panic = nullptr;
 };
 
-void smoke_worker(SmokeCtx ctx)
-{
-    std::vector<nvme::DmaBuffer *> idle;
-    std::deque<nvme::DmaBuffer *> pending;
+void smoke_worker(SmokeCtx ctx) {
+    std::vector<nvme::DmaBuffer*> idle;
+    std::deque<nvme::DmaBuffer*> pending;
     idle.reserve(ctx.depth);
     for (unsigned i = 0; i < ctx.depth; ++i) {
-        nvme::DmaBuffer *buf = ctx.pool->acquire();
+        nvme::DmaBuffer* buf = ctx.pool->acquire();
         if (buf == nullptr) {
             break;
         }
@@ -457,7 +474,7 @@ void smoke_worker(SmokeCtx ctx)
         uint64_t now = nvme::now_ns();
         if (now < ctx.deadline_ns) {
             while (!idle.empty() && pending.size() < ctx.depth) {
-                nvme::DmaBuffer *buf = idle.back();
+                nvme::DmaBuffer* buf = idle.back();
                 idle.pop_back();
                 rng ^= rng << 13;
                 rng ^= rng >> 17;
@@ -468,9 +485,8 @@ void smoke_worker(SmokeCtx ctx)
                 if (write) {
                     std::memset(buf->ptr, static_cast<int>(rng & 0xFF), io_bytes);
                 }
-                nvme::CmdHandle h = write
-                                        ? ctx.drv->submit_write(ctx.queue, slba, 2, *buf)
-                                        : ctx.drv->submit_read(ctx.queue, slba, 2, *buf);
+                nvme::CmdHandle h = write ? ctx.drv->submit_write(ctx.queue, slba, 2, *buf)
+                                          : ctx.drv->submit_read(ctx.queue, slba, 2, *buf);
                 if (!h.ok) {
                     ctx.stalls->fetch_add(1, std::memory_order_relaxed);
                     idle.push_back(buf);
@@ -507,7 +523,7 @@ void smoke_worker(SmokeCtx ctx)
             std::this_thread::yield();
         }
     }
-    for (auto *buf : idle) {
+    for (auto* buf : idle) {
         ctx.pool->release(buf);
     }
 }
@@ -515,13 +531,11 @@ void smoke_worker(SmokeCtx ctx)
 /* ------------------------------------------------------------------ */
 /* swap-test: continuous I/O across a firmware activation               */
 /* ------------------------------------------------------------------ */
-void sleep_ms(unsigned ms)
-{
+void sleep_ms(unsigned ms) {
     std::this_thread::sleep_for(std::chrono::milliseconds(ms));
 }
 
-std::string host_description()
-{
+std::string host_description() {
     struct utsname u;
     std::ostringstream os;
     if (uname(&u) == 0) {
@@ -540,60 +554,50 @@ struct JsonWriter {
 
     void begin() { os << "{"; }
     void end() { os << "}"; }
-    void key(const char *k)
-    {
+    void key(const char* k) {
         if (!first) {
             os << ",";
         }
         first = false;
         os << "\"" << k << "\":";
     }
-    void field(const char *k, const std::string &v)
-    {
+    void field(const char* k, const std::string& v) {
         key(k);
         os << "\"" << v << "\"";
     }
-    void field(const char *k, const char *v) { field(k, std::string(v)); }
-    void field(const char *k, long long v)
-    {
+    void field(const char* k, const char* v) { field(k, std::string(v)); }
+    void field(const char* k, long long v) {
         key(k);
         os << v;
     }
-    void field(const char *k, unsigned long long v)
-    {
+    void field(const char* k, unsigned long long v) {
         key(k);
         os << v;
     }
-    void field(const char *k, int v)
-    {
+    void field(const char* k, int v) {
         key(k);
         os << v;
     }
-    void field(const char *k, unsigned v)
-    {
+    void field(const char* k, unsigned v) {
         key(k);
         os << v;
     }
-    void field(const char *k, bool v)
-    {
+    void field(const char* k, bool v) {
         key(k);
         os << (v ? "true" : "false");
     }
-    void field_us(const char *k, double v)
-    {
+    void field_us(const char* k, double v) {
         key(k);
         os << std::fixed << std::setprecision(3) << v;
     }
-    void nested(const char *k, const std::string &json)
-    {
+    void nested(const char* k, const std::string& json) {
         key(k);
         os << json;
     }
     std::string str() const { return os.str(); }
 };
 
-std::string latency_json(const nvme::LatencySummary &s)
-{
+std::string latency_json(const nvme::LatencySummary& s) {
     std::ostringstream os;
     os << std::fixed << std::setprecision(3);
     os << "{\"count\":" << s.count << ",\"mean\":" << s.mean_us << ",\"p50\":" << s.p50_us
@@ -602,12 +606,11 @@ std::string latency_json(const nvme::LatencySummary &s)
     return os.str();
 }
 
-std::string status_map_json(const std::map<uint16_t, uint64_t> &m)
-{
+std::string status_map_json(const std::map<uint16_t, uint64_t>& m) {
     std::ostringstream os;
     os << "{";
     bool first = true;
-    for (const auto &kv : m) {
+    for (const auto& kv : m) {
         if (!first) {
             os << ",";
         }
@@ -618,8 +621,7 @@ std::string status_map_json(const std::map<uint16_t, uint64_t> &m)
     return os.str();
 }
 
-int cmd_swap_test(const Options &o)
-{
+int cmd_swap_test(const Options& o) {
     if (o.action < -1 || o.action > 3) {
         std::fprintf(stderr, "nvmeslotswap: --action must be none,0,1,2,3\n");
         return 2;
@@ -674,8 +676,7 @@ int cmd_swap_test(const Options &o)
     std::string revision = o.rev;
 
     if (o.action >= 0) {
-        std::vector<uint8_t> image =
-            nvme::FirmwareUpdater::build_image(revision, o.size, o.seed);
+        std::vector<uint8_t> image = nvme::FirmwareUpdater::build_image(revision, o.size, o.seed);
         uint64_t s0 = nvme::now_ns();
         nvme::StageResult sr = upd.stage(o.slot, image, 4096);
         stage_us = (nvme::now_ns() - s0) / 1000;
@@ -749,9 +750,9 @@ int cmd_swap_test(const Options &o)
                  << ",\"warmup_ms\":" << o.warmup_ms << ",\"post_ms\":" << o.post_ms
                  << ",\"rw\":" << o.rw << ",\"seed\":" << o.seed << ",\"slot\":" << o.slot
                  << ",\"rev\":\"" << revision << "\",\"size\":" << o.size
-                 << ",\"action\":" << o.action << ",\"fail_commit\":"
-                 << (o.fail_commit ? "true" : "false") << ",\"stall_us\":" << o.stall_us
-                 << "}";
+                 << ",\"action\":" << o.action
+                 << ",\"fail_commit\":" << (o.fail_commit ? "true" : "false")
+                 << ",\"stall_us\":" << o.stall_us << "}";
         j.nested("config", cfg_json.str());
     }
     j.field("activation_action", o.action);
@@ -827,8 +828,7 @@ int cmd_swap_test(const Options &o)
     return 0;
 }
 
-int cmd_io(const Options &o)
-{
+int cmd_io(const Options& o) {
     nvme_dev_cfg cfg = default_cfg();
     nvme::SimBackend backend(cfg);
     nvme::NvmeDriver drv(backend);
@@ -839,8 +839,7 @@ int cmd_io(const Options &o)
     std::vector<std::unique_ptr<nvme::DmaBufferPool>> pools;
     pools.reserve(o.queues);
     for (unsigned i = 0; i < o.queues; ++i) {
-        pools.push_back(std::make_unique<nvme::DmaBufferPool>(
-            backend, 2 * NVME_LBA_SIZE, o.depth));
+        pools.push_back(std::make_unique<nvme::DmaBufferPool>(backend, 2 * NVME_LBA_SIZE, o.depth));
     }
 
     std::atomic<uint64_t> submitted{0}, completed{0}, failed{0}, stalls{0};
@@ -869,10 +868,10 @@ int cmd_io(const Options &o)
         ctxs.push_back(std::move(ctx));
     }
     for (unsigned i = 0; i < o.queues; ++i) {
-        SmokeCtx *ctx = ctxs[i].get();
+        SmokeCtx* ctx = ctxs[i].get();
         threads.emplace_back([ctx] { smoke_worker(*ctx); });
     }
-    for (auto &t : threads) {
+    for (auto& t : threads) {
         t.join();
     }
     uint64_t elapsed = nvme::now_ns() - start;
@@ -888,15 +887,35 @@ int cmd_io(const Options &o)
     return failed.load() == 0 ? 0 : 1;
 }
 
+#ifdef NVMESS_BACKEND_VFIO
+int cmd_vfio_probe(const Options& o) {
+    if (o.vfio_group.empty() || o.vfio_device.empty()) {
+        std::fprintf(stderr, "nvmeslotswap: vfio-probe needs --vfio-group and --vfio-device\n");
+        return 2;
+    }
+    std::unique_ptr<nvme::Backend> backend(nvme::make_vfio_backend(o.vfio_device, o.vfio_group));
+    volatile void* bar0 = backend->bar0();
+    uint64_t cap = nvme_mmio_read64(bar0, NVME_REG_CAP);
+    uint32_t vs = nvme_mmio_read32(bar0, NVME_REG_VS);
+    uint32_t csts = nvme_mmio_read32(bar0, NVME_REG_CSTS);
+    std::printf("backend: %s\n", backend->name());
+    std::printf("BAR0 mapped, doorbell stride %u bytes\n", backend->doorbell_stride());
+    std::printf("CAP=0x%016llx (MQES=%u)  VS=0x%08x  CSTS=0x%08x\n",
+                static_cast<unsigned long long>(cap), nvme_cap_mqes(cap) + 1u, vs, csts);
+    std::printf("note: this transport is compile-verified only in this repository;\n"
+                "      the queue layer still requires the in-process controller.\n");
+    return 0;
+}
+#endif
+
 } // namespace
 
-int main(int argc, char **argv)
-{
+int main(int argc, char** argv) {
     if (argc < 2) {
         print_usage(stderr);
         return 2;
     }
-    const char *cmd = argv[1];
+    const char* cmd = argv[1];
     if (std::strcmp(cmd, "--help") == 0 || std::strcmp(cmd, "-h") == 0 ||
         std::strcmp(cmd, "help") == 0) {
         print_usage(stdout);
@@ -925,7 +944,12 @@ int main(int argc, char **argv)
         if (std::strcmp(cmd, "swap-test") == 0) {
             return cmd_swap_test(opts);
         }
-    } catch (const std::exception &e) {
+#ifdef NVMESS_BACKEND_VFIO
+        if (std::strcmp(cmd, "vfio-probe") == 0) {
+            return cmd_vfio_probe(opts);
+        }
+#endif
+    } catch (const std::exception& e) {
         std::fprintf(stderr, "nvmeslotswap: %s\n", e.what());
         return 1;
     }

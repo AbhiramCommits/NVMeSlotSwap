@@ -19,8 +19,7 @@
 #define FW_STATE_MAGIC 0x5346574Eu /* "NFWS" little endian */
 #define FW_STATE_VERSION 1u
 
-static void revision_pad(char dst[8], const char *src)
-{
+static void revision_pad(char dst[8], const char* src) {
     size_t n = strlen(src);
     if (n > 8) {
         n = 8;
@@ -31,8 +30,7 @@ static void revision_pad(char dst[8], const char *src)
     }
 }
 
-void fw_mgr_revision(const struct nvme_fw_slot *slot, char out[9])
-{
+void fw_mgr_revision(const struct nvme_fw_slot* slot, char out[9]) {
     size_t n = 8;
     if (slot == NULL || !slot->occupied) {
         out[0] = '\0';
@@ -45,33 +43,30 @@ void fw_mgr_revision(const struct nvme_fw_slot *slot, char out[9])
     out[n] = '\0';
 }
 
-static void refresh_active_revision(struct fw_mgr *fw)
-{
-    struct nvme_fw_slot *s = &fw->slots[fw->active_slot - 1];
+static void refresh_active_revision(struct fw_mgr* fw) {
+    struct nvme_fw_slot* s = &fw->slots[fw->active_slot - 1];
     fw_mgr_revision(s, fw->active_revision);
 }
 
-void fw_mgr_init(struct fw_mgr *fw)
-{
+void fw_mgr_init(struct fw_mgr* fw) {
     memset(fw, 0, sizeof(*fw));
     fw->active_slot = NVME_FW_SLOT1;
     fw->next_slot = NVME_FW_SLOT1;
     fw->self_test_fail = 0;
 
-    struct nvme_fw_slot *s = &fw->slots[NVME_FW_SLOT1 - 1];
+    struct nvme_fw_slot* s = &fw->slots[NVME_FW_SLOT1 - 1];
     s->occupied = 1;
     s->read_only = 1;
     revision_pad(s->revision, "FW1.0.0");
     s->size = 4096;
-    s->image = (uint8_t *)calloc(1, s->size);
+    s->image = (uint8_t*)calloc(1, s->size);
     if (s->image != NULL) {
         sha256(s->image, s->size, s->sha256);
     }
     refresh_active_revision(fw);
 }
 
-void fw_mgr_free(struct fw_mgr *fw)
-{
+void fw_mgr_free(struct fw_mgr* fw) {
     if (fw == NULL) {
         return;
     }
@@ -85,8 +80,7 @@ void fw_mgr_free(struct fw_mgr *fw)
     fw->staging_cap = 0;
 }
 
-static int fw_mgr_reserve(struct fw_mgr *fw, uint32_t need)
-{
+static int fw_mgr_reserve(struct fw_mgr* fw, uint32_t need) {
     if (need <= fw->staging_cap) {
         return 0;
     }
@@ -100,7 +94,7 @@ static int fw_mgr_reserve(struct fw_mgr *fw, uint32_t need)
     if (cap < need) {
         return -1;
     }
-    uint8_t *p = (uint8_t *)realloc(fw->staging, cap);
+    uint8_t* p = (uint8_t*)realloc(fw->staging, cap);
     if (p == NULL) {
         return -1;
     }
@@ -109,9 +103,7 @@ static int fw_mgr_reserve(struct fw_mgr *fw, uint32_t need)
     return 0;
 }
 
-uint16_t fw_mgr_download_chunk(struct fw_mgr *fw, uint32_t ofst, const void *data,
-                               uint32_t len)
-{
+uint16_t fw_mgr_download_chunk(struct fw_mgr* fw, uint32_t ofst, const void* data, uint32_t len) {
     if (len == 0 || (len & 3u) != 0 || data == NULL) {
         return NVME_SC_INVALID_FIELD;
     }
@@ -135,10 +127,11 @@ uint16_t fw_mgr_download_chunk(struct fw_mgr *fw, uint32_t ofst, const void *dat
     return NVME_SC_SUCCESS;
 }
 
-static void discard_staging(struct fw_mgr *fw) { fw->staging_len = 0; }
+static void discard_staging(struct fw_mgr* fw) {
+    fw->staging_len = 0;
+}
 
-static int payload_contains(const uint8_t *p, size_t len, const char *needle)
-{
+static int payload_contains(const uint8_t* p, size_t len, const char* needle) {
     size_t n = strlen(needle);
     if (n == 0 || len < n) {
         return 0;
@@ -151,8 +144,7 @@ static int payload_contains(const uint8_t *p, size_t len, const char *needle)
     return 0;
 }
 
-static int validate_staged_image(struct fw_mgr *fw, struct nvme_fw_image_hdr *hdr)
-{
+static int validate_staged_image(struct fw_mgr* fw, struct nvme_fw_image_hdr* hdr) {
     if (fw->staging == NULL || fw->staging_len < sizeof(*hdr)) {
         return 0;
     }
@@ -174,15 +166,14 @@ static int validate_staged_image(struct fw_mgr *fw, struct nvme_fw_image_hdr *hd
     return 1;
 }
 
-static int install_slot(struct fw_mgr *fw, uint8_t slot, const struct nvme_fw_image_hdr *hdr)
-{
+static int install_slot(struct fw_mgr* fw, uint8_t slot, const struct nvme_fw_image_hdr* hdr) {
     if (slot < 1 || slot > NVME_FW_SLOT_COUNT) {
         return -1;
     }
-    struct nvme_fw_slot *s = &fw->slots[slot - 1];
-    uint8_t *image = NULL;
+    struct nvme_fw_slot* s = &fw->slots[slot - 1];
+    uint8_t* image = NULL;
     if (hdr->payload_len > 0) {
-        image = (uint8_t *)malloc(hdr->payload_len);
+        image = (uint8_t*)malloc(hdr->payload_len);
         if (image == NULL) {
             return -1;
         }
@@ -198,8 +189,7 @@ static int install_slot(struct fw_mgr *fw, uint8_t slot, const struct nvme_fw_im
     return 0;
 }
 
-uint16_t fw_mgr_prepare(struct fw_mgr *fw, uint8_t slot, uint8_t action)
-{
+uint16_t fw_mgr_prepare(struct fw_mgr* fw, uint8_t slot, uint8_t action) {
     if (slot < 1 || slot > NVME_FW_SLOT_COUNT) {
         return NVME_SC_FW_SLOT_INVALID;
     }
@@ -230,9 +220,8 @@ uint16_t fw_mgr_prepare(struct fw_mgr *fw, uint8_t slot, uint8_t action)
     return NVME_SC_SUCCESS;
 }
 
-struct fw_commit_result fw_mgr_apply(struct fw_mgr *fw, uint8_t slot, uint8_t action,
-                                     int self_test_fail)
-{
+struct fw_commit_result fw_mgr_apply(struct fw_mgr* fw, uint8_t slot, uint8_t action,
+                                     int self_test_fail) {
     struct fw_commit_result r;
     memset(&r, 0, sizeof(r));
     r.active_slot = fw->active_slot;
@@ -279,8 +268,8 @@ struct fw_commit_result fw_mgr_apply(struct fw_mgr *fw, uint8_t slot, uint8_t ac
     refresh_active_revision(fw);
 
     {
-        const struct nvme_fw_slot *s = &fw->slots[slot - 1];
-        if (self_test_fail || payload_contains((const uint8_t *)s->revision, 8, "BAD")) {
+        const struct nvme_fw_slot* s = &fw->slots[slot - 1];
+        if (self_test_fail || payload_contains((const uint8_t*)s->revision, 8, "BAD")) {
             /* Post-activation self test failed: put the previous slot back. */
             fw->active_slot = prev;
             fw->next_slot = prev;
@@ -302,9 +291,8 @@ struct fw_commit_result fw_mgr_apply(struct fw_mgr *fw, uint8_t slot, uint8_t ac
     return r;
 }
 
-struct fw_commit_result fw_mgr_commit(struct fw_mgr *fw, uint8_t slot, uint8_t action,
-                                      int self_test_fail)
-{
+struct fw_commit_result fw_mgr_commit(struct fw_mgr* fw, uint8_t slot, uint8_t action,
+                                      int self_test_fail) {
     uint16_t st = fw_mgr_prepare(fw, slot, action);
     if (st != NVME_SC_SUCCESS) {
         struct fw_commit_result r;
@@ -317,8 +305,7 @@ struct fw_commit_result fw_mgr_commit(struct fw_mgr *fw, uint8_t slot, uint8_t a
     return fw_mgr_apply(fw, slot, action, self_test_fail);
 }
 
-void fw_mgr_apply_pending(struct fw_mgr *fw)
-{
+void fw_mgr_apply_pending(struct fw_mgr* fw) {
     if (fw->next_slot >= 1 && fw->next_slot <= NVME_FW_SLOT_COUNT &&
         fw->next_slot != fw->active_slot && fw->slots[fw->next_slot - 1].occupied) {
         fw->active_slot = fw->next_slot;
@@ -328,29 +315,33 @@ void fw_mgr_apply_pending(struct fw_mgr *fw)
     fw->next_slot = fw->active_slot;
 }
 
-void fw_mgr_read_log(const struct fw_mgr *fw, struct nvme_fw_slot_log *out)
-{
+void fw_mgr_read_log(const struct fw_mgr* fw, struct nvme_fw_slot_log* out) {
     memset(out, 0, sizeof(*out));
     out->afi = nvme_afi_encode(fw->active_slot, fw->next_slot);
     for (unsigned i = 0; i < NVME_FW_SLOT_COUNT; ++i) {
-        const struct nvme_fw_slot *s = &fw->slots[i];
+        const struct nvme_fw_slot* s = &fw->slots[i];
         for (unsigned j = 0; j < 8; ++j) {
             out->frs[i][j] = s->occupied ? s->revision[j] : ' ';
         }
     }
 }
 
-const char *fw_mgr_active_revision(const struct fw_mgr *fw) { return fw->active_revision; }
+const char* fw_mgr_active_revision(const struct fw_mgr* fw) {
+    return fw->active_revision;
+}
 
 /* ------------------------------------------------------------------ */
 /* Emulated-device state persistence (CLI convenience)                  */
 /* ------------------------------------------------------------------ */
-static int write_u32(FILE *f, uint32_t v) { return fwrite(&v, sizeof(v), 1, f) == 1 ? 0 : -1; }
-static int read_u32(FILE *f, uint32_t *v) { return fread(v, sizeof(*v), 1, f) == 1 ? 0 : -1; }
+static int write_u32(FILE* f, uint32_t v) {
+    return fwrite(&v, sizeof(v), 1, f) == 1 ? 0 : -1;
+}
+static int read_u32(FILE* f, uint32_t* v) {
+    return fread(v, sizeof(*v), 1, f) == 1 ? 0 : -1;
+}
 
-int fw_mgr_save(const struct fw_mgr *fw, const char *path)
-{
-    FILE *f = fopen(path, "wb");
+int fw_mgr_save(const struct fw_mgr* fw, const char* path) {
+    FILE* f = fopen(path, "wb");
     if (f == NULL) {
         return -1;
     }
@@ -373,7 +364,7 @@ int fw_mgr_save(const struct fw_mgr *fw, const char *path)
     ok &= write_u32(f, fw->staging_len) == 0;
 
     for (unsigned i = 0; i < NVME_FW_SLOT_COUNT; ++i) {
-        const struct nvme_fw_slot *s = &fw->slots[i];
+        const struct nvme_fw_slot* s = &fw->slots[i];
         uint8_t flags = (uint8_t)((s->occupied ? 1 : 0) | (s->read_only ? 2 : 0));
         uint32_t size = s->size;
         ok &= fwrite(&flags, 1, 1, f) == 1;
@@ -382,7 +373,7 @@ int fw_mgr_save(const struct fw_mgr *fw, const char *path)
         ok &= write_u32(f, size) == 0;
     }
     for (unsigned i = 0; i < NVME_FW_SLOT_COUNT; ++i) {
-        const struct nvme_fw_slot *s = &fw->slots[i];
+        const struct nvme_fw_slot* s = &fw->slots[i];
         if (s->occupied && s->size > 0) {
             ok &= fwrite(s->image, 1, s->size, f) == s->size;
         }
@@ -396,9 +387,8 @@ int fw_mgr_save(const struct fw_mgr *fw, const char *path)
     return ok ? 0 : -1;
 }
 
-int fw_mgr_load(struct fw_mgr *fw, const char *path)
-{
-    FILE *f = fopen(path, "rb");
+int fw_mgr_load(struct fw_mgr* fw, const char* path) {
+    FILE* f = fopen(path, "rb");
     if (f == NULL) {
         return -1;
     }
@@ -408,16 +398,15 @@ int fw_mgr_load(struct fw_mgr *fw, const char *path)
     uint64_t activations = 0, rollbacks = 0;
     uint32_t staging_len = 0;
 
-    if (read_u32(f, &magic) != 0 || read_u32(f, &version) != 0 ||
-        magic != FW_STATE_MAGIC || version != FW_STATE_VERSION) {
+    if (read_u32(f, &magic) != 0 || read_u32(f, &version) != 0 || magic != FW_STATE_MAGIC ||
+        version != FW_STATE_VERSION) {
         fclose(f);
         return -1;
     }
-    if (fread(&active, 1, 1, f) != 1 || fread(&next, 1, 1, f) != 1 ||
-        fread(&fail, 1, 1, f) != 1 || fread(pad, 1, sizeof(pad), f) != sizeof(pad) ||
+    if (fread(&active, 1, 1, f) != 1 || fread(&next, 1, 1, f) != 1 || fread(&fail, 1, 1, f) != 1 ||
+        fread(pad, 1, sizeof(pad), f) != sizeof(pad) ||
         fread(&activations, sizeof(uint64_t), 1, f) != 1 ||
-        fread(&rollbacks, sizeof(uint64_t), 1, f) != 1 ||
-        read_u32(f, &staging_len) != 0) {
+        fread(&rollbacks, sizeof(uint64_t), 1, f) != 1 || read_u32(f, &staging_len) != 0) {
         fclose(f);
         return -1;
     }
@@ -447,7 +436,7 @@ int fw_mgr_load(struct fw_mgr *fw, const char *path)
     }
     for (unsigned i = 0; i < NVME_FW_SLOT_COUNT; ++i) {
         if (slots[i].occupied && slots[i].size > 0) {
-            slots[i].image = (uint8_t *)malloc(slots[i].size);
+            slots[i].image = (uint8_t*)malloc(slots[i].size);
             if (slots[i].image == NULL ||
                 fread(slots[i].image, 1, slots[i].size, f) != slots[i].size) {
                 for (unsigned j = 0; j < NVME_FW_SLOT_COUNT; ++j) {
@@ -459,9 +448,9 @@ int fw_mgr_load(struct fw_mgr *fw, const char *path)
         }
     }
 
-    uint8_t *staging = NULL;
+    uint8_t* staging = NULL;
     if (staging_len > 0) {
-        staging = (uint8_t *)malloc(staging_len);
+        staging = (uint8_t*)malloc(staging_len);
         if (staging == NULL || fread(staging, 1, staging_len, f) != staging_len) {
             free(staging);
             for (unsigned j = 0; j < NVME_FW_SLOT_COUNT; ++j) {

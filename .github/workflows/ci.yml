@@ -49,6 +49,14 @@ jobs:
       - name: Run concurrency test under TSan
         run: ./build-tsan/tests/test_concurrency
 
+      - name: Configure VFIO backend (compile check, Linux only)
+        if: runner.os == 'Linux'
+        run: cmake -S . -B build-vfio -DNVMESS_BACKEND_VFIO=ON -DNVMESS_BUILD_TESTS=OFF
+
+      - name: Build VFIO backend (compile check, Linux only)
+        if: runner.os == 'Linux'
+        run: cmake --build build-vfio -j
+
       - name: Short experiment pass
         run: python3 tools/run_experiments.py --quick
 

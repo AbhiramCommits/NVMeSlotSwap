@@ -31,9 +31,9 @@ enum nvme_latency_model {
 };
 
 struct nvme_dev_cfg {
-    uint64_t ns_lba_count;      /* namespace size in 4 KiB LBAs          */
-    uint32_t doorbell_stride;   /* bytes: 4 << CAP.DSTRD                 */
-    uint32_t max_qid;           /* highest I/O queue id supported        */
+    uint64_t ns_lba_count;    /* namespace size in 4 KiB LBAs          */
+    uint32_t doorbell_stride; /* bytes: 4 << CAP.DSTRD                 */
+    uint32_t max_qid;         /* highest I/O queue id supported        */
     uint32_t io_latency_base_ns;
     uint32_t io_latency_jitter_ns;
     enum nvme_latency_model latency_model;
@@ -44,37 +44,37 @@ struct nvme_dev_cfg {
     size_t dma_arena_bytes;     /* shared "DMA" arena size               */
 };
 
-void nvme_dev_cfg_default(struct nvme_dev_cfg *cfg);
+void nvme_dev_cfg_default(struct nvme_dev_cfg* cfg);
 
-nvme_dev_t *nvme_dev_create(const struct nvme_dev_cfg *cfg);
-void nvme_dev_destroy(nvme_dev_t *dev);
+nvme_dev_t* nvme_dev_create(const struct nvme_dev_cfg* cfg);
+void nvme_dev_destroy(nvme_dev_t* dev);
 
-volatile void *nvme_dev_bar0(nvme_dev_t *dev);
-uint32_t nvme_dev_bar0_size(const nvme_dev_t *dev);
-uint32_t nvme_dev_doorbell_stride(const nvme_dev_t *dev);
+volatile void* nvme_dev_bar0(nvme_dev_t* dev);
+uint32_t nvme_dev_bar0_size(const nvme_dev_t* dev);
+uint32_t nvme_dev_doorbell_stride(const nvme_dev_t* dev);
 
 /* Page-aligned shared memory; out_iova receives the device-visible address. */
-void *nvme_dev_dma_map(nvme_dev_t *dev, size_t len, uint64_t *out_iova);
-void nvme_dev_dma_unmap(nvme_dev_t *dev, void *ptr);
+void* nvme_dev_dma_map(nvme_dev_t* dev, size_t len, uint64_t* out_iova);
+void nvme_dev_dma_unmap(nvme_dev_t* dev, void* ptr);
 
 /* Quiesce window: stop fetching new SQEs for the given duration but let
  * every already-queued command complete. */
-void nvme_dev_set_stall(nvme_dev_t *dev, uint64_t ns);
+void nvme_dev_set_stall(nvme_dev_t* dev, uint64_t ns);
 
 /* Fault injection for the post-activation self-test (CLI --fail-commit). */
-void nvme_dev_set_self_test_fail(nvme_dev_t *dev, int fail);
+void nvme_dev_set_self_test_fail(nvme_dev_t* dev, int fail);
 
-uint32_t nvme_dev_csts(nvme_dev_t *dev);
-uint64_t nvme_dev_ready_count(nvme_dev_t *dev); /* CC.EN 0->1 transitions */
-uint64_t nvme_dev_reset_count(nvme_dev_t *dev);
-uint64_t nvme_dev_last_activation_ns(nvme_dev_t *dev);
-uint64_t nvme_dev_command_count(nvme_dev_t *dev);
+uint32_t nvme_dev_csts(nvme_dev_t* dev);
+uint64_t nvme_dev_ready_count(nvme_dev_t* dev); /* CC.EN 0->1 transitions */
+uint64_t nvme_dev_reset_count(nvme_dev_t* dev);
+uint64_t nvme_dev_last_activation_ns(nvme_dev_t* dev);
+uint64_t nvme_dev_command_count(nvme_dev_t* dev);
 
 /* Persist/restore only the emulated firmware subsystem.  The CLI uses this so
  * that `fw stage`, `fw commit` and `fw list` observe the same emulated part
  * across process invocations.  Returns 0 on success, negative errno on error. */
-int nvme_dev_save_fw_state(nvme_dev_t *dev, const char *path);
-int nvme_dev_load_fw_state(nvme_dev_t *dev, const char *path);
+int nvme_dev_save_fw_state(nvme_dev_t* dev, const char* path);
+int nvme_dev_load_fw_state(nvme_dev_t* dev, const char* path);
 
 typedef struct nvme_dev_cfg nvme_dev_cfg;
 

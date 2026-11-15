@@ -21,20 +21,19 @@
 
 namespace nvme {
 
-uint64_t now_ns()
-{
-    return static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now().time_since_epoch())
-            .count());
+uint64_t now_ns() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                     std::chrono::steady_clock::now().time_since_epoch())
+                                     .count());
 }
 
-uint64_t boot_relative_ns() { return now_ns(); }
+uint64_t boot_relative_ns() {
+    return now_ns();
+}
 
 namespace {
 
-Completion to_completion(const nvme_cqe &cqe)
-{
+Completion to_completion(const nvme_cqe& cqe) {
     Completion c;
     c.cid = cqe.cid;
     c.status = cqe.status;
@@ -45,8 +44,7 @@ Completion to_completion(const nvme_cqe &cqe)
     return c;
 }
 
-std::string trim_field(const char *data, size_t len)
-{
+std::string trim_field(const char* data, size_t len) {
     size_t end = len;
     while (end > 0 && (data[end - 1] == ' ' || data[end - 1] == '\0')) {
         --end;
@@ -54,8 +52,7 @@ std::string trim_field(const char *data, size_t len)
     return std::string(data, end);
 }
 
-std::string status_text(unsigned sc, unsigned sct)
-{
+std::string status_text(unsigned sc, unsigned sct) {
     char buf[64];
     std::snprintf(buf, sizeof(buf), "status=0x%02x/0x%x", sc, sct);
     return std::string(buf);
@@ -66,9 +63,8 @@ std::string status_text(unsigned sc, unsigned sct)
 /* ------------------------------------------------------------------ */
 /* DMA buffer pool                                                     */
 /* ------------------------------------------------------------------ */
-DmaBufferPool::DmaBufferPool(Backend &backend, size_t buffer_size, size_t count)
-    : backend_(backend)
-{
+DmaBufferPool::DmaBufferPool(Backend& backend, size_t buffer_size, size_t count)
+    : backend_(backend) {
     if (buffer_size == 0 || count == 0) {
         throw std::invalid_argument("DmaBufferPool needs a non-zero size and count");
     }
@@ -87,29 +83,26 @@ DmaBufferPool::DmaBufferPool(Backend &backend, size_t buffer_size, size_t count)
     }
 }
 
-DmaBufferPool::~DmaBufferPool()
-{
+DmaBufferPool::~DmaBufferPool() {
     std::lock_guard<std::mutex> lock(mutex_);
-    for (auto &buf : buffers_) {
+    for (auto& buf : buffers_) {
         if (buf->ptr != nullptr) {
             backend_.dma_free(buf->ptr);
         }
     }
 }
 
-DmaBuffer *DmaBufferPool::acquire()
-{
+DmaBuffer* DmaBufferPool::acquire() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (free_.empty()) {
         return nullptr;
     }
-    DmaBuffer *buf = free_.back();
+    DmaBuffer* buf = free_.back();
     free_.pop_back();
     return buf;
 }
 
-void DmaBufferPool::release(DmaBuffer *buf)
-{
+void DmaBufferPool::release(DmaBuffer* buf) {
     if (buf == nullptr) {
         return;
     }
@@ -117,8 +110,7 @@ void DmaBufferPool::release(DmaBuffer *buf)
     free_.push_back(buf);
 }
 
-size_t DmaBufferPool::free_count() const
-{
+size_t DmaBufferPool::free_count() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return free_.size();
 }
@@ -126,9 +118,7 @@ size_t DmaBufferPool::free_count() const
 /* ------------------------------------------------------------------ */
 /* Driver                                                              */
 /* ------------------------------------------------------------------ */
-NvmeDriver::NvmeDriver(Backend &backend)
-    : backend_(backend), admin_pool_(backend, 4096, 4)
-{
+NvmeDriver::NvmeDriver(Backend& backend) : backend_(backend), admin_pool_(backend, 4096, 4) {
     bar0_ = backend_.bar0();
     doorbell_stride_ = backend_.doorbell_stride();
     if (backend_.sim_device() == nullptr) {
@@ -141,11 +131,10 @@ NvmeDriver::NvmeDriver(Backend &backend)
     }
 }
 
-NvmeDriver::~NvmeDriver()
-{
+NvmeDriver::~NvmeDriver() {
     try {
         if (enabled_) {
-            for (auto &q : queues_) {
+            for (auto& q : queues_) {
                 nvme_sqe sqe{};
                 sqe.opc = NVME_ADMIN_DELETE_SQ;
                 sqe.nsid = 1;
@@ -161,7 +150,7 @@ NvmeDriver::~NvmeDriver()
     } catch (...) {
         /* best effort during teardown */
     }
-    for (auto &q : queues_) {
+    for (auto& q : queues_) {
         nvme_qp_destroy(&q->qp);
     }
     queues_.clear();
@@ -170,13 +159,11 @@ NvmeDriver::~NvmeDriver()
     }
 }
 
-bool NvmeDriver::is_ready()
-{
+bool NvmeDriver::is_ready() {
     return (nvme_mmio_read32(bar0_, NVME_REG_CSTS) & NVME_CSTS_RDY) != 0;
 }
 
-bool NvmeDriver::wait_ready(uint32_t timeout_us)
-{
+bool NvmeDriver::wait_ready(uint32_t timeout_us) {
     const uint64_t deadline = now_ns() + static_cast<uint64_t>(timeout_us) * 1000ull;
     while (!is_ready()) {
         if (now_ns() > deadline) {
@@ -187,8 +174,7 @@ bool NvmeDriver::wait_ready(uint32_t timeout_us)
     return true;
 }
 
-void NvmeDriver::controller_reset()
-{
+void NvmeDriver::controller_reset() {
     if (!enabled_) {
         return;
     }
@@ -204,8 +190,7 @@ void NvmeDriver::controller_reset()
     io_depth_ = 0;
 }
 
-void NvmeDriver::reset_and_enable()
-{
+void NvmeDriver::reset_and_enable() {
     if (enabled_) {
         controller_reset();
     } else if (is_ready()) {
@@ -229,8 +214,7 @@ void NvmeDriver::reset_and_enable()
     nvme_mmio_write64(bar0_, NVME_REG_ASQ, admin_.qp.sq_iova);
     nvme_mmio_write64(bar0_, NVME_REG_ACQ, admin_.qp.cq_iova);
     nvme_mmio_write32(bar0_, NVME_REG_CC,
-                      NVME_CC_EN | (6u << NVME_CC_IOSQES_SHIFT) |
-                          (4u << NVME_CC_IOCQES_SHIFT));
+                      NVME_CC_EN | (6u << NVME_CC_IOSQES_SHIFT) | (4u << NVME_CC_IOCQES_SHIFT));
 
     if (!wait_ready(3000000)) {
         throw std::runtime_error("controller failed to set CSTS.RDY");
@@ -242,15 +226,13 @@ void NvmeDriver::reset_and_enable()
     enabled_ = true;
 }
 
-int NvmeDriver::submit_admin_async(const nvme_sqe &sqe, uint16_t cid)
-{
+int NvmeDriver::submit_admin_async(const nvme_sqe& sqe, uint16_t cid) {
     nvme_sqe copy = sqe;
     copy.cid = cid;
     return nvme_qp_submit(&admin_.qp, &copy, cid);
 }
 
-Completion NvmeDriver::admin_wait(uint16_t cid)
-{
+Completion NvmeDriver::admin_wait(uint16_t cid) {
     const uint64_t deadline = now_ns() + 5000000000ull;
     for (;;) {
         nvme_cqe raw[8];
@@ -267,8 +249,7 @@ Completion NvmeDriver::admin_wait(uint16_t cid)
     }
 }
 
-Completion NvmeDriver::sync_admin(const nvme_sqe &sqe)
-{
+Completion NvmeDriver::sync_admin(const nvme_sqe& sqe) {
     uint16_t cid = next_admin_cid_++;
     if (next_admin_cid_ == 0) {
         next_admin_cid_ = 1;
@@ -289,8 +270,7 @@ Completion NvmeDriver::sync_admin(const nvme_sqe &sqe)
     return admin_wait(cid);
 }
 
-Completion NvmeDriver::sync_admin_checked(const nvme_sqe &sqe, const char *what)
-{
+Completion NvmeDriver::sync_admin_checked(const nvme_sqe& sqe, const char* what) {
     Completion c = sync_admin(sqe);
     if (!c.ok()) {
         throw std::runtime_error(std::string(what) + " failed: " + status_text(c.sc, c.sct));
@@ -298,18 +278,16 @@ Completion NvmeDriver::sync_admin_checked(const nvme_sqe &sqe, const char *what)
     return c;
 }
 
-DmaBuffer *NvmeDriver::admin_buf()
-{
-    DmaBuffer *buf = admin_pool_.acquire();
+DmaBuffer* NvmeDriver::admin_buf() {
+    DmaBuffer* buf = admin_pool_.acquire();
     if (buf == nullptr) {
         throw std::runtime_error("admin DMA buffer pool exhausted");
     }
     return buf;
 }
 
-IdentifyCtrl NvmeDriver::identify_ctrl()
-{
-    DmaBuffer *buf = admin_buf();
+IdentifyCtrl NvmeDriver::identify_ctrl() {
+    DmaBuffer* buf = admin_buf();
     nvme_sqe sqe{};
     sqe.opc = NVME_ADMIN_IDENTIFY;
     sqe.nsid = 0;
@@ -336,9 +314,8 @@ IdentifyCtrl NvmeDriver::identify_ctrl()
     return out;
 }
 
-IdentifyNs NvmeDriver::identify_ns(uint32_t nsid)
-{
-    DmaBuffer *buf = admin_buf();
+IdentifyNs NvmeDriver::identify_ns(uint32_t nsid) {
+    DmaBuffer* buf = admin_buf();
     nvme_sqe sqe{};
     sqe.opc = NVME_ADMIN_IDENTIFY;
     sqe.nsid = nsid;
@@ -359,9 +336,8 @@ IdentifyNs NvmeDriver::identify_ns(uint32_t nsid)
     return out;
 }
 
-FwSlotInfo NvmeDriver::read_slot_log()
-{
-    DmaBuffer *buf = admin_buf();
+FwSlotInfo NvmeDriver::read_slot_log() {
+    DmaBuffer* buf = admin_buf();
     std::memset(buf->ptr, 0, 512);
     nvme_sqe sqe{};
     sqe.opc = NVME_ADMIN_GET_LOG_PAGE;
@@ -387,8 +363,7 @@ FwSlotInfo NvmeDriver::read_slot_log()
     return info;
 }
 
-void NvmeDriver::set_number_of_queues(unsigned count)
-{
+void NvmeDriver::set_number_of_queues(unsigned count) {
     nvme_sqe sqe{};
     sqe.opc = NVME_ADMIN_SET_FEATURES;
     sqe.cdw10 = NVME_FEAT_NUM_QUEUES;
@@ -396,8 +371,7 @@ void NvmeDriver::set_number_of_queues(unsigned count)
     (void)sync_admin(sqe);
 }
 
-void NvmeDriver::create_io_queues(unsigned count, uint16_t depth)
-{
+void NvmeDriver::create_io_queues(unsigned count, uint16_t depth) {
     if (!enabled_) {
         throw std::runtime_error("create_io_queues called before the controller was enabled");
     }
@@ -419,7 +393,7 @@ void NvmeDriver::create_io_queues(unsigned count, uint16_t depth)
     }
 
     for (unsigned i = 0; i < count; ++i) {
-        QueuePair &q = *queues_[i];
+        QueuePair& q = *queues_[i];
         const uint16_t qid = q.qp.qid;
 
         nvme_sqe cq{};
@@ -442,38 +416,36 @@ void NvmeDriver::create_io_queues(unsigned count, uint16_t depth)
     set_number_of_queues(count);
 }
 
-void NvmeDriver::recreate_io_queues()
-{
+void NvmeDriver::recreate_io_queues() {
     if (!enabled_ || queues_.empty()) {
         throw std::runtime_error("recreate_io_queues requires an enabled controller");
     }
-    for (auto &q : queues_) {
+    for (auto& q : queues_) {
         nvme_qp_reset(&q->qp);
         q->next_cid = 1;
         nvme_sqe cq{};
         cq.opc = NVME_ADMIN_CREATE_CQ;
         cq.nsid = 1;
         cq.prp1 = q->qp.cq_iova;
-        cq.cdw10 = (static_cast<uint32_t>(q->depth) - 1u) |
-                   (static_cast<uint32_t>(q->qp.qid) << 16);
+        cq.cdw10 =
+            (static_cast<uint32_t>(q->depth) - 1u) | (static_cast<uint32_t>(q->qp.qid) << 16);
         cq.cdw11 = 1u;
         sync_admin_checked(cq, "Create I/O Completion Queue");
         nvme_sqe sq{};
         sq.opc = NVME_ADMIN_CREATE_SQ;
         sq.nsid = 1;
         sq.prp1 = q->qp.sq_iova;
-        sq.cdw10 = (static_cast<uint32_t>(q->depth) - 1u) |
-                   (static_cast<uint32_t>(q->qp.qid) << 16);
+        sq.cdw10 =
+            (static_cast<uint32_t>(q->depth) - 1u) | (static_cast<uint32_t>(q->qp.qid) << 16);
         sq.cdw11 = 1u | (static_cast<uint32_t>(q->qp.qid) << 16);
         sync_admin_checked(sq, "Create I/O Submission Queue");
     }
     set_number_of_queues(static_cast<unsigned>(queues_.size()));
 }
 
-void NvmeDriver::destroy_io_queues()
-{
+void NvmeDriver::destroy_io_queues() {
     if (enabled_) {
-        for (auto &q : queues_) {
+        for (auto& q : queues_) {
             nvme_sqe sq{};
             sq.opc = NVME_ADMIN_DELETE_SQ;
             sq.nsid = 1;
@@ -486,34 +458,30 @@ void NvmeDriver::destroy_io_queues()
             (void)sync_admin(cq);
         }
     }
-    for (auto &q : queues_) {
+    for (auto& q : queues_) {
         nvme_qp_destroy(&q->qp);
     }
     queues_.clear();
     io_depth_ = 0;
 }
 
-QueuePair &NvmeDriver::queue(unsigned idx)
-{
+QueuePair& NvmeDriver::queue(unsigned idx) {
     if (idx >= queues_.size()) {
         throw std::out_of_range("I/O queue index out of range");
     }
     return *queues_[idx];
 }
 
-CmdHandle NvmeDriver::submit_read(unsigned q, uint64_t slba, uint16_t nlb, const DmaBuffer &buf)
-{
+CmdHandle NvmeDriver::submit_read(unsigned q, uint64_t slba, uint16_t nlb, const DmaBuffer& buf) {
     return submit_io(q, NVME_IO_READ, slba, nlb, buf);
 }
 
-CmdHandle NvmeDriver::submit_write(unsigned q, uint64_t slba, uint16_t nlb, const DmaBuffer &buf)
-{
+CmdHandle NvmeDriver::submit_write(unsigned q, uint64_t slba, uint16_t nlb, const DmaBuffer& buf) {
     return submit_io(q, NVME_IO_WRITE, slba, nlb, buf);
 }
 
-CmdHandle NvmeDriver::submit_flush(unsigned q)
-{
-    QueuePair &qp = queue(q);
+CmdHandle NvmeDriver::submit_flush(unsigned q) {
+    QueuePair& qp = queue(q);
     CmdHandle h;
     h.qid = qp.qp.qid;
     uint16_t cid = qp.next_cid++;
@@ -533,9 +501,8 @@ CmdHandle NvmeDriver::submit_flush(unsigned q)
 }
 
 CmdHandle NvmeDriver::submit_io(unsigned qidx, uint8_t opc, uint64_t slba, uint16_t nlb,
-                                const DmaBuffer &buf)
-{
-    QueuePair &qp = queue(qidx);
+                                const DmaBuffer& buf) {
+    QueuePair& qp = queue(qidx);
     const uint64_t bytes = static_cast<uint64_t>(nlb) * NVME_LBA_SIZE;
     CmdHandle h;
     h.qid = qp.qp.qid;
@@ -568,9 +535,8 @@ CmdHandle NvmeDriver::submit_io(unsigned qidx, uint8_t opc, uint64_t slba, uint1
     return h;
 }
 
-int NvmeDriver::poll_batch(unsigned q, Completion *out, int max)
-{
-    QueuePair &qp = queue(q);
+int NvmeDriver::poll_batch(unsigned q, Completion* out, int max) {
+    QueuePair& qp = queue(q);
     nvme_cqe raw[32];
     if (max > 32) {
         max = 32;
@@ -582,8 +548,7 @@ int NvmeDriver::poll_batch(unsigned q, Completion *out, int max)
     return n;
 }
 
-std::optional<Completion> NvmeDriver::poll(unsigned q)
-{
+std::optional<Completion> NvmeDriver::poll(unsigned q) {
     Completion c;
     if (poll_batch(q, &c, 1) == 1) {
         return c;
@@ -591,36 +556,31 @@ std::optional<Completion> NvmeDriver::poll(unsigned q)
     return std::nullopt;
 }
 
-void NvmeDriver::set_self_test_fail(bool fail)
-{
+void NvmeDriver::set_self_test_fail(bool fail) {
     nvme_dev_set_self_test_fail(backend_.sim_device(), fail ? 1 : 0);
 }
 
-void NvmeDriver::save_fw_state(const std::string &path)
-{
+void NvmeDriver::save_fw_state(const std::string& path) {
     if (nvme_dev_save_fw_state(backend_.sim_device(), path.c_str()) != 0) {
         throw std::runtime_error("failed to save emulated firmware state to " + path);
     }
 }
 
-bool NvmeDriver::load_fw_state(const std::string &path)
-{
+bool NvmeDriver::load_fw_state(const std::string& path) {
     return nvme_dev_load_fw_state(backend_.sim_device(), path.c_str()) == 0;
 }
 
 /* ------------------------------------------------------------------ */
 /* FirmwareUpdater                                                     */
 /* ------------------------------------------------------------------ */
-std::string FirmwareUpdater::normalize_revision(const std::string &rev)
-{
+std::string FirmwareUpdater::normalize_revision(const std::string& rev) {
     std::string r = rev.substr(0, 8);
     r.resize(8, ' ');
     return r;
 }
 
-std::vector<uint8_t> FirmwareUpdater::build_image(const std::string &revision,
-                                                  size_t payload_len, uint32_t seed)
-{
+std::vector<uint8_t> FirmwareUpdater::build_image(const std::string& revision, size_t payload_len,
+                                                  uint32_t seed) {
     /* Keep the image a whole number of dwords: FW Image Download counts data
      * in dwords. */
     payload_len = (payload_len + 3u) & ~static_cast<size_t>(3u);
@@ -637,7 +597,7 @@ std::vector<uint8_t> FirmwareUpdater::build_image(const std::string &revision,
     hdr.payload_len = static_cast<uint32_t>(payload_len);
 
     std::vector<uint8_t> image(sizeof(hdr) + payload_len);
-    uint8_t *payload = image.data() + sizeof(hdr);
+    uint8_t* payload = image.data() + sizeof(hdr);
     uint64_t x = 0x9E3779B97F4A7C15ull ^ static_cast<uint64_t>(seed);
     for (size_t i = 0; i < payload_len; ++i) {
         x += 0x9E3779B97F4A7C15ull;
@@ -652,9 +612,8 @@ std::vector<uint8_t> FirmwareUpdater::build_image(const std::string &revision,
     return image;
 }
 
-StageResult FirmwareUpdater::stage(unsigned slot, const std::vector<uint8_t> &image,
-                                   size_t chunk_bytes)
-{
+StageResult FirmwareUpdater::stage(unsigned slot, const std::vector<uint8_t>& image,
+                                   size_t chunk_bytes) {
     if (slot < 1 || slot > NVME_FW_SLOT_COUNT) {
         throw std::invalid_argument("firmware slot must be 1..7");
     }
@@ -666,7 +625,7 @@ StageResult FirmwareUpdater::stage(unsigned slot, const std::vector<uint8_t> &im
     }
 
     DmaBufferPool pool(driver_.backend(), NVME_LBA_SIZE, 1);
-    DmaBuffer *buf = pool.acquire();
+    DmaBuffer* buf = pool.acquire();
     if (buf == nullptr) {
         throw std::runtime_error("unable to allocate a firmware download buffer");
     }
@@ -686,8 +645,8 @@ StageResult FirmwareUpdater::stage(unsigned slot, const std::vector<uint8_t> &im
         sqe.opc = NVME_ADMIN_FW_IMAGE_DOWNLOAD;
         sqe.nsid = 0;
         sqe.prp1 = buf->iova;
-        sqe.cdw10 = static_cast<uint32_t>(n / 4u) - 1u;           /* NUMD, 0-based */
-        sqe.cdw11 = static_cast<uint32_t>(off / 4u);              /* OFST in dwords */
+        sqe.cdw10 = static_cast<uint32_t>(n / 4u) - 1u; /* NUMD, 0-based */
+        sqe.cdw11 = static_cast<uint32_t>(off / 4u);    /* OFST in dwords */
         Completion c = driver_.sync_admin(sqe);
         if (!c.ok()) {
             result.status = static_cast<uint16_t>(c.sc);
@@ -704,15 +663,14 @@ StageResult FirmwareUpdater::stage(unsigned slot, const std::vector<uint8_t> &im
     return result;
 }
 
-CommitResult FirmwareUpdater::commit(unsigned slot, CommitAction action)
-{
+CommitResult FirmwareUpdater::commit(unsigned slot, CommitAction action) {
     FwSlotInfo before = read_slot_log();
 
     nvme_sqe sqe{};
     sqe.opc = NVME_ADMIN_FW_COMMIT;
     sqe.nsid = 0;
-    sqe.cdw10 = (static_cast<uint32_t>(slot) & 0x7u) |
-                ((static_cast<uint32_t>(action) & 0x7u) << 3);
+    sqe.cdw10 =
+        (static_cast<uint32_t>(slot) & 0x7u) | ((static_cast<uint32_t>(action) & 0x7u) << 3);
     sqe.cdw11 = 0; /* BPID 0 */
 
     const uint64_t start = now_ns();
@@ -728,8 +686,8 @@ CommitResult FirmwareUpdater::commit(unsigned slot, CommitAction action)
     if (after.active_slot >= 1 && after.active_slot <= 7) {
         r.active_revision = after.revisions[after.active_slot - 1];
     }
-    if (action == CommitAction::ReplaceActivateImmediate && !c.ok() && slot >= 1 &&
-        slot <= 7 && before.revisions[slot - 1] != after.revisions[slot - 1] &&
+    if (action == CommitAction::ReplaceActivateImmediate && !c.ok() && slot >= 1 && slot <= 7 &&
+        before.revisions[slot - 1] != after.revisions[slot - 1] &&
         after.active_slot == before.active_slot) {
         /* The target slot now carries the new revision, but the active slot
          * did not change: the controller installed the image, failed its
@@ -740,10 +698,11 @@ CommitResult FirmwareUpdater::commit(unsigned slot, CommitAction action)
     return r;
 }
 
-FwSlotInfo FirmwareUpdater::read_slot_log() { return driver_.read_slot_log(); }
+FwSlotInfo FirmwareUpdater::read_slot_log() {
+    return driver_.read_slot_log();
+}
 
-bool FirmwareUpdater::verify_activation(const std::string &revision)
-{
+bool FirmwareUpdater::verify_activation(const std::string& revision) {
     FwSlotInfo info = read_slot_log();
     if (info.active_slot < 1 || info.active_slot > 7) {
         return false;
@@ -759,8 +718,7 @@ bool FirmwareUpdater::verify_activation(const std::string &revision)
     return active == want;
 }
 
-std::string FirmwareUpdater::active_revision()
-{
+std::string FirmwareUpdater::active_revision() {
     FwSlotInfo info = read_slot_log();
     if (info.active_slot >= 1 && info.active_slot <= 7) {
         return info.revisions[info.active_slot - 1];
@@ -771,8 +729,7 @@ std::string FirmwareUpdater::active_revision()
 /* ------------------------------------------------------------------ */
 /* Utility file helpers                                                */
 /* ------------------------------------------------------------------ */
-std::vector<uint8_t> read_file_bytes(const std::string &path)
-{
+std::vector<uint8_t> read_file_bytes(const std::string& path) {
     std::ifstream in(path, std::ios::binary);
     if (!in) {
         return {};
@@ -781,13 +738,12 @@ std::vector<uint8_t> read_file_bytes(const std::string &path)
                                 std::istreambuf_iterator<char>());
 }
 
-bool write_file_bytes(const std::string &path, const std::vector<uint8_t> &bytes)
-{
+bool write_file_bytes(const std::string& path, const std::vector<uint8_t>& bytes) {
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     if (!out) {
         return false;
     }
-    out.write(reinterpret_cast<const char *>(bytes.data()),
+    out.write(reinterpret_cast<const char*>(bytes.data()),
               static_cast<std::streamsize>(bytes.size()));
     return out.good();
 }

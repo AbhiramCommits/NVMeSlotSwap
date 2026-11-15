@@ -34,21 +34,21 @@ extern "C" {
 /* Submission Queue Entry - 64 bytes (NVMe base spec, Figure 78).       */
 /* ------------------------------------------------------------------ */
 struct nvme_sqe {
-    uint8_t opc;      /* bits 7:0   opcode                       */
-    uint8_t flags;    /* bits 1:0 fuse, bits 7:6 psdt            */
-    uint16_t cid;     /* command identifier                      */
-    uint32_t nsid;    /* namespace identifier                    */
-    uint32_t cdw2;    /* command dword 2                         */
-    uint32_t cdw3;    /* command dword 3                         */
-    uint64_t mptr;    /* metadata pointer                        */
-    uint64_t prp1;    /* physical region page 1                  */
-    uint64_t prp2;    /* physical region page 2 (or PRP list)    */
-    uint32_t cdw10;   /* command dword 10                        */
-    uint32_t cdw11;   /* command dword 11                        */
-    uint32_t cdw12;   /* command dword 12                        */
-    uint32_t cdw13;   /* command dword 13                        */
-    uint32_t cdw14;   /* command dword 14                        */
-    uint32_t cdw15;   /* command dword 15                        */
+    uint8_t opc;    /* bits 7:0   opcode                       */
+    uint8_t flags;  /* bits 1:0 fuse, bits 7:6 psdt            */
+    uint16_t cid;   /* command identifier                      */
+    uint32_t nsid;  /* namespace identifier                    */
+    uint32_t cdw2;  /* command dword 2                         */
+    uint32_t cdw3;  /* command dword 3                         */
+    uint64_t mptr;  /* metadata pointer                        */
+    uint64_t prp1;  /* physical region page 1                  */
+    uint64_t prp2;  /* physical region page 2 (or PRP list)    */
+    uint32_t cdw10; /* command dword 10                        */
+    uint32_t cdw11; /* command dword 11                        */
+    uint32_t cdw12; /* command dword 12                        */
+    uint32_t cdw13; /* command dword 13                        */
+    uint32_t cdw14; /* command dword 14                        */
+    uint32_t cdw15; /* command dword 15                        */
 };
 NVME_STATIC_ASSERT(sizeof(struct nvme_sqe) == 64, "NVMe SQE must be 64 bytes");
 
@@ -76,16 +76,22 @@ NVME_STATIC_ASSERT(sizeof(struct nvme_cqe) == 16, "NVMe CQE must be 16 bytes");
 #define NVME_CQE_SCT_MASK 0x0E00u
 #define NVME_CQE_DNR 0x4000u
 
-static inline uint16_t nvme_cqe_status_encode(unsigned phase, unsigned sc, unsigned sct,
-                                              int dnr)
-{
+static inline uint16_t nvme_cqe_status_encode(unsigned phase, unsigned sc, unsigned sct, int dnr) {
     return (uint16_t)(((phase & 1u) << 0) | ((sc & 0xFFu) << 1) | ((sct & 0x7u) << 9) |
                       (dnr ? NVME_CQE_DNR : 0u));
 }
-static inline unsigned nvme_cqe_phase(uint16_t status) { return status & 1u; }
-static inline unsigned nvme_cqe_sc(uint16_t status) { return (status >> 1) & 0xFFu; }
-static inline unsigned nvme_cqe_sct(uint16_t status) { return (status >> 9) & 0x7u; }
-static inline int nvme_cqe_dnr(uint16_t status) { return (status & NVME_CQE_DNR) != 0; }
+static inline unsigned nvme_cqe_phase(uint16_t status) {
+    return status & 1u;
+}
+static inline unsigned nvme_cqe_sc(uint16_t status) {
+    return (status >> 1) & 0xFFu;
+}
+static inline unsigned nvme_cqe_sct(uint16_t status) {
+    return (status >> 9) & 0x7u;
+}
+static inline int nvme_cqe_dnr(uint16_t status) {
+    return (status & NVME_CQE_DNR) != 0;
+}
 
 /* ------------------------------------------------------------------ */
 /* Admin opcodes (subset exercised by this project).                    */
@@ -249,54 +255,54 @@ NVME_STATIC_ASSERT(sizeof(struct nvme_id_ctrl) == 4096, "Identify Controller is 
 /* Identify Namespace - 4096 bytes.                                     */
 /* ------------------------------------------------------------------ */
 struct nvme_lbaf {
-    uint16_t ms;  /* metadata size                       */
-    uint8_t ds;   /* LBA data size, log2 (12 => 4096 B)  */
-    uint8_t rp;   /* relative performance                */
+    uint16_t ms; /* metadata size                       */
+    uint8_t ds;  /* LBA data size, log2 (12 => 4096 B)  */
+    uint8_t rp;  /* relative performance                */
 };
 NVME_STATIC_ASSERT(sizeof(struct nvme_lbaf) == 4, "LBA format descriptor is 4 bytes");
 
 struct nvme_id_ns {
-    uint64_t nsze;         /* 0   namespace size in LBAs            */
-    uint64_t ncap;         /* 8   namespace capacity in LBAs        */
-    uint64_t nuse;         /* 16  namespace utilization in LBAs     */
-    uint8_t nsfeat;        /* 24  namespace features                */
-    uint8_t nlbaf;         /* 25  number of LBA formats (0-based)   */
-    uint8_t flbas;         /* 26  formatted LBA size                */
-    uint8_t mc;            /* 27  metadata capabilities             */
-    uint8_t dpc;           /* 28  end-to-end data protection caps   */
-    uint8_t dps;           /* 29  end-to-end data protection type   */
-    uint8_t nmic;          /* 30  namespace multi-path I/O          */
-    uint8_t rescap;        /* 31  reservation capabilities          */
-    uint8_t fpi;           /* 32  format progress indicator         */
-    uint8_t dlfeat;        /* 33  deallocate logical block features */
-    uint8_t rsvd34[2];     /* 34..35                                */
-    uint16_t nawun;        /* 36  namespace atomic write unit normal */
-    uint16_t nawupf;       /* 38  namespace atomic write unit pf    */
-    uint16_t nacwu;        /* 40  namespace atomic compare & write  */
-    uint16_t nabsn;        /* 42  namespace atomic boundary size    */
-    uint16_t nabo;         /* 44  namespace atomic boundary offset  */
-    uint16_t nabspf;       /* 46  namespace atomic boundary pf      */
-    uint16_t noiob;        /* 48  namespace optimal I/O boundary    */
-    uint8_t nvmcap[16];    /* 50  NVM capacity                      */
-    uint16_t npwg;         /* 66  namespace preferred write granularity */
-    uint16_t npwa;         /* 68  namespace preferred write alignment   */
-    uint16_t npdg;         /* 70  namespace preferred deallocate gran.  */
-    uint16_t npda;         /* 72  namespace preferred deallocate align. */
-    uint16_t nows;         /* 74  namespace optimal write size      */
-    uint16_t mssrl;        /* 76  max single sector read latency    */
-    uint8_t mcl[4];        /* 78  max command latency (unaligned)   */
-    uint8_t msrc;          /* 82  max single sector read latency    */
-    uint8_t rsvd83[1];     /* 83                                    */
-    uint32_t anagrpid;     /* 84  ANA group identifier              */
-    uint8_t rsvd88[3];     /* 88..90                                */
-    uint8_t nsattr;        /* 91  namespace attributes              */
-    uint16_t nvmsetid;     /* 92  NVM set identifier                */
-    uint16_t endgid;       /* 94  endurance group identifier        */
-    uint8_t nguid[16];     /* 96  namespace globally unique id      */
-    uint8_t eui64[8];      /* 112 EUI-64                            */
-    uint8_t rsvd120[8];    /* 120..127                              */
+    uint64_t nsze;             /* 0   namespace size in LBAs            */
+    uint64_t ncap;             /* 8   namespace capacity in LBAs        */
+    uint64_t nuse;             /* 16  namespace utilization in LBAs     */
+    uint8_t nsfeat;            /* 24  namespace features                */
+    uint8_t nlbaf;             /* 25  number of LBA formats (0-based)   */
+    uint8_t flbas;             /* 26  formatted LBA size                */
+    uint8_t mc;                /* 27  metadata capabilities             */
+    uint8_t dpc;               /* 28  end-to-end data protection caps   */
+    uint8_t dps;               /* 29  end-to-end data protection type   */
+    uint8_t nmic;              /* 30  namespace multi-path I/O          */
+    uint8_t rescap;            /* 31  reservation capabilities          */
+    uint8_t fpi;               /* 32  format progress indicator         */
+    uint8_t dlfeat;            /* 33  deallocate logical block features */
+    uint8_t rsvd34[2];         /* 34..35                                */
+    uint16_t nawun;            /* 36  namespace atomic write unit normal */
+    uint16_t nawupf;           /* 38  namespace atomic write unit pf    */
+    uint16_t nacwu;            /* 40  namespace atomic compare & write  */
+    uint16_t nabsn;            /* 42  namespace atomic boundary size    */
+    uint16_t nabo;             /* 44  namespace atomic boundary offset  */
+    uint16_t nabspf;           /* 46  namespace atomic boundary pf      */
+    uint16_t noiob;            /* 48  namespace optimal I/O boundary    */
+    uint8_t nvmcap[16];        /* 50  NVM capacity                      */
+    uint16_t npwg;             /* 66  namespace preferred write granularity */
+    uint16_t npwa;             /* 68  namespace preferred write alignment   */
+    uint16_t npdg;             /* 70  namespace preferred deallocate gran.  */
+    uint16_t npda;             /* 72  namespace preferred deallocate align. */
+    uint16_t nows;             /* 74  namespace optimal write size      */
+    uint16_t mssrl;            /* 76  max single sector read latency    */
+    uint8_t mcl[4];            /* 78  max command latency (unaligned)   */
+    uint8_t msrc;              /* 82  max single sector read latency    */
+    uint8_t rsvd83[1];         /* 83                                    */
+    uint32_t anagrpid;         /* 84  ANA group identifier              */
+    uint8_t rsvd88[3];         /* 88..90                                */
+    uint8_t nsattr;            /* 91  namespace attributes              */
+    uint16_t nvmsetid;         /* 92  NVM set identifier                */
+    uint16_t endgid;           /* 94  endurance group identifier        */
+    uint8_t nguid[16];         /* 96  namespace globally unique id      */
+    uint8_t eui64[8];          /* 112 EUI-64                            */
+    uint8_t rsvd120[8];        /* 120..127                              */
     struct nvme_lbaf lbaf[64]; /* 128..383                          */
-    uint8_t rsvd384[3712]; /* 384..4095                             */
+    uint8_t rsvd384[3712];     /* 384..4095                             */
 };
 NVME_STATIC_ASSERT(sizeof(struct nvme_id_ns) == 4096, "Identify Namespace is 4096 bytes");
 NVME_STATIC_ASSERT(offsetof(struct nvme_id_ns, lbaf) == 128, "lbaf must be at offset 128");
@@ -306,9 +312,9 @@ NVME_STATIC_ASSERT(offsetof(struct nvme_id_ns, lbaf) == 128, "lbaf must be at of
 /* afi bits 2:0 = active slot, bits 6:4 = next activation slot.         */
 /* ------------------------------------------------------------------ */
 struct nvme_fw_slot_log {
-    uint8_t afi;      /* 0                                       */
-    uint8_t rsvd1[7]; /* 1..7                                    */
-    char frs[7][8];   /* 8..63  firmware revision for slot 1..7   */
+    uint8_t afi;        /* 0                                       */
+    uint8_t rsvd1[7];   /* 1..7                                    */
+    char frs[7][8];     /* 8..63  firmware revision for slot 1..7   */
     uint8_t rsvd2[448]; /* 64..511                                */
 };
 NVME_STATIC_ASSERT(sizeof(struct nvme_fw_slot_log) == 512,
@@ -318,13 +324,16 @@ NVME_STATIC_ASSERT(sizeof(struct nvme_fw_slot_log) == 512,
 #define NVME_AFI_NEXT_SHIFT 4u
 #define NVME_AFI_NEXT_MASK 0x70u
 
-static inline uint8_t nvme_afi_encode(unsigned active_slot, unsigned next_slot)
-{
+static inline uint8_t nvme_afi_encode(unsigned active_slot, unsigned next_slot) {
     return (uint8_t)((active_slot & NVME_AFI_ACTIVE_MASK) |
                      ((next_slot << NVME_AFI_NEXT_SHIFT) & NVME_AFI_NEXT_MASK));
 }
-static inline unsigned nvme_afi_active(uint8_t afi) { return afi & NVME_AFI_ACTIVE_MASK; }
-static inline unsigned nvme_afi_next(uint8_t afi) { return (afi & NVME_AFI_NEXT_MASK) >> NVME_AFI_NEXT_SHIFT; }
+static inline unsigned nvme_afi_active(uint8_t afi) {
+    return afi & NVME_AFI_ACTIVE_MASK;
+}
+static inline unsigned nvme_afi_next(uint8_t afi) {
+    return (afi & NVME_AFI_NEXT_MASK) >> NVME_AFI_NEXT_SHIFT;
+}
 
 /* ------------------------------------------------------------------ */
 /* SMART / Health Information log page (LID 0x02) - stub, 512 bytes.    */

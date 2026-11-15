@@ -14,16 +14,14 @@ namespace {
 
 constexpr uint64_t kStride = 0x9E3779B97F4A7C15ull;
 
-uint64_t mix64(uint64_t x)
-{
+uint64_t mix64(uint64_t x) {
     x += kStride;
     x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
     x = (x ^ (x >> 27)) * 0x94D049BB133111EBull;
     return x ^ (x >> 31);
 }
 
-void fill_block(uint8_t *p, uint64_t lba, uint64_t queue)
-{
+void fill_block(uint8_t* p, uint64_t lba, uint64_t queue) {
     uint64_t v = mix64(lba ^ (queue << 48));
     for (size_t i = 0; i < NVME_LBA_SIZE / 8; ++i) {
         std::memcpy(p + i * 8, &v, 8);
@@ -31,8 +29,7 @@ void fill_block(uint8_t *p, uint64_t lba, uint64_t queue)
     }
 }
 
-bool check_block(const uint8_t *p, uint64_t lba, uint64_t queue)
-{
+bool check_block(const uint8_t* p, uint64_t lba, uint64_t queue) {
     uint64_t v = mix64(lba ^ (queue << 48));
     for (size_t i = 0; i < NVME_LBA_SIZE / 8; ++i) {
         uint64_t got;
@@ -54,8 +51,7 @@ struct Totals {
 
 } // namespace
 
-TEST(Concurrency, FourQueuesTwentyThousandCommandsNoLoss)
-{
+TEST(Concurrency, FourQueuesTwentyThousandCommandsNoLoss) {
     nvme_dev_cfg cfg;
     nvme_dev_cfg_default(&cfg);
     cfg.ns_lba_count = 16384;
@@ -78,15 +74,15 @@ TEST(Concurrency, FourQueuesTwentyThousandCommandsNoLoss)
     for (unsigned t = 0; t < 4; ++t) {
         threads.emplace_back([&, t] {
             struct Pending {
-                DmaBuffer *buf;
+                DmaBuffer* buf;
                 uint64_t lba;
                 bool write;
             };
             DmaBufferPool pool(backend, 2 * NVME_LBA_SIZE, kQd);
             std::deque<Pending> pending;
-            std::vector<DmaBuffer *> idle;
+            std::vector<DmaBuffer*> idle;
             for (size_t i = 0; i < kQd; ++i) {
-                DmaBuffer *b = pool.acquire();
+                DmaBuffer* b = pool.acquire();
                 if (b != nullptr) {
                     idle.push_back(b);
                 }
@@ -108,7 +104,7 @@ TEST(Concurrency, FourQueuesTwentyThousandCommandsNoLoss)
                     } else {
                         totals.completed.fetch_add(1, std::memory_order_relaxed);
                         if (!p.write) {
-                            const auto *bytes = static_cast<const uint8_t *>(p.buf->ptr);
+                            const auto* bytes = static_cast<const uint8_t*>(p.buf->ptr);
                             if (!check_block(bytes, p.lba, t) ||
                                 !check_block(bytes + NVME_LBA_SIZE, p.lba + 1, t)) {
                                 totals.integrity.fetch_add(1, std::memory_order_relaxed);
@@ -121,12 +117,12 @@ TEST(Concurrency, FourQueuesTwentyThousandCommandsNoLoss)
             };
 
             uint64_t prefill_pos = 0;
-            uint64_t *prefill_cursor = nullptr;
+            uint64_t* prefill_cursor = nullptr;
             auto issue = [&](bool write) -> bool {
                 if (idle.empty()) {
                     return false;
                 }
-                DmaBuffer *buf = idle.back();
+                DmaBuffer* buf = idle.back();
                 uint64_t lba;
                 if (prefill_cursor != nullptr) {
                     lba = base + *prefill_cursor;
@@ -136,8 +132,8 @@ TEST(Concurrency, FourQueuesTwentyThousandCommandsNoLoss)
                     lba &= ~1ull;
                 }
                 if (write) {
-                    fill_block(static_cast<uint8_t *>(buf->ptr), lba, t);
-                    fill_block(static_cast<uint8_t *>(buf->ptr) + NVME_LBA_SIZE, lba + 1, t);
+                    fill_block(static_cast<uint8_t*>(buf->ptr), lba, t);
+                    fill_block(static_cast<uint8_t*>(buf->ptr) + NVME_LBA_SIZE, lba + 1, t);
                 }
                 CmdHandle h = write ? driver.submit_write(t, lba, 2, *buf)
                                     : driver.submit_read(t, lba, 2, *buf);
@@ -191,12 +187,12 @@ TEST(Concurrency, FourQueuesTwentyThousandCommandsNoLoss)
             while (!pending.empty()) {
                 reap_one();
             }
-            for (auto *b : idle) {
+            for (auto* b : idle) {
                 pool.release(b);
             }
         });
     }
-    for (auto &th : threads) {
+    for (auto& th : threads) {
         th.join();
     }
 

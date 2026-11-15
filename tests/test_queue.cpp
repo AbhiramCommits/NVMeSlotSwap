@@ -10,8 +10,7 @@ namespace {
 
 class QueueTest : public ::testing::Test {
 protected:
-    void SetUp() override
-    {
+    void SetUp() override {
         nvme_dev_cfg_default(&cfg_);
         cfg_.ns_lba_count = 64;
         cfg_.max_qid = 4;
@@ -22,26 +21,22 @@ protected:
          * these SQEs; the test plays the controller when posting CQEs. */
     }
 
-    void TearDown() override
-    {
+    void TearDown() override {
         nvme_qp_destroy(&qp_);
         nvme_dev_destroy(dev_);
     }
 
-    static void post_cqe(nvme_qp &qp, uint16_t index, uint16_t cid, uint8_t phase)
-    {
-        nvme_cqe *cqe = &qp.cq[index];
+    static void post_cqe(nvme_qp& qp, uint16_t index, uint16_t cid, uint8_t phase) {
+        nvme_cqe* cqe = &qp.cq[index];
         cqe->cdw0 = 0;
         cqe->rsvd = 0;
         cqe->sqhd = 0;
         cqe->sqid = qp.qid;
         cqe->cid = cid;
-        __atomic_store_n(&cqe->status, nvme_cqe_status_encode(phase, 0, 0, 0),
-                         __ATOMIC_RELEASE);
+        __atomic_store_n(&cqe->status, nvme_cqe_status_encode(phase, 0, 0, 0), __ATOMIC_RELEASE);
     }
 
-    static nvme_sqe make_sqe(uint16_t cid)
-    {
+    static nvme_sqe make_sqe(uint16_t cid) {
         nvme_sqe sqe;
         std::memset(&sqe, 0, sizeof(sqe));
         sqe.opc = NVME_IO_WRITE;
@@ -52,13 +47,12 @@ protected:
     }
 
     nvme_dev_cfg cfg_{};
-    nvme_dev_t *dev_ = nullptr;
+    nvme_dev_t* dev_ = nullptr;
     nvme_qp qp_{};
     static constexpr uint16_t kDepth = 8;
 };
 
-TEST_F(QueueTest, FullRingReturnsEagainAndPreservesInFlightSqe)
-{
+TEST_F(QueueTest, FullRingReturnsEagainAndPreservesInFlightSqe) {
     for (uint16_t i = 0; i < kDepth; ++i) {
         nvme_sqe sqe = make_sqe(i);
         ASSERT_EQ(0, nvme_qp_submit(&qp_, &sqe, i)) << "submit " << i;
@@ -75,8 +69,7 @@ TEST_F(QueueTest, FullRingReturnsEagainAndPreservesInFlightSqe)
     EXPECT_EQ(1u, qp_.sq[1].cid);
 }
 
-TEST_F(QueueTest, PhaseAndOrderAcrossThreeWraps)
-{
+TEST_F(QueueTest, PhaseAndOrderAcrossThreeWraps) {
     uint16_t next_cid = 0;
     uint8_t phase = 1;
 
@@ -115,8 +108,7 @@ TEST_F(QueueTest, PhaseAndOrderAcrossThreeWraps)
     EXPECT_EQ(static_cast<uint64_t>(3 * kDepth), nvme_qp_submitted(&qp_));
 }
 
-TEST_F(QueueTest, PartialBatchOnlyWrapsWhenLastEntryConsumed)
-{
+TEST_F(QueueTest, PartialBatchOnlyWrapsWhenLastEntryConsumed) {
     for (uint16_t i = 0; i < kDepth; ++i) {
         nvme_sqe sqe = make_sqe(i);
         ASSERT_EQ(0, nvme_qp_submit(&qp_, &sqe, i));
