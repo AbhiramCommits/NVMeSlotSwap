@@ -128,14 +128,13 @@ int nvme_qp_submit(struct nvme_qp* qp, const struct nvme_sqe* sqe, uint16_t cid)
     memcpy(slot, sqe, sizeof(*slot));
     slot->cid = cid;
 
-    /* Publish the SQE before the doorbell store below. */
-    __atomic_thread_fence(__ATOMIC_RELEASE);
-
     /* Doorbells carry a free-running 16-bit index; the controller derives the
      * memory slot with (index % depth).  A masked value would make a full ring
      * indistinguishable from an empty one when depth commands are outstanding. */
     uint16_t tail = (uint16_t)(cur + 1u);
-    __atomic_store_n(&qp->sq_tail, tail, __ATOMIC_RELAXED);
+    /* Release stores publish the SQE written above to any reader that
+     * acquires either the tail or the doorbell. */
+    __atomic_store_n(&qp->sq_tail, tail, __ATOMIC_RELEASE);
     __atomic_store_n(qp->sq_db, tail, __ATOMIC_RELEASE);
 
     __atomic_add_fetch(&qp->submitted, 1, __ATOMIC_RELAXED);
@@ -158,9 +157,9 @@ int nvme_qp_reap(struct nvme_qp* qp, struct nvme_cqe* out, int max) {
         if (nvme_cqe_phase(status) != phase) {
             break;
         }
-        /* Phase matched: the rest of this CQE was written before the release
-         * store that published the status word. */
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        /* Phase matched: the acquire load above synchronizes with the release
+         * store that published the status word, so the rest of the CQE is
+         * visible here. */
         out[n] = *cqe;
         out[n].status = status;
 
