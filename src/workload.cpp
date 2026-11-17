@@ -250,7 +250,7 @@ Workload::Workload(NvmeDriver& driver, const WorkloadConfig& cfg)
     }
     ns_lbas_ = ns.nsze;
     io_blocks_ = static_cast<uint16_t>(std::max(1u, std::min(cfg_.io_blocks, 2u)));
-    if (ns_lbas_ < io_blocks_ + 2) {
+    if (ns_lbas_ < static_cast<uint64_t>(io_blocks_) + 2u) {
         throw std::runtime_error("namespace is too small for the requested I/O size");
     }
     if (cfg_.queues == 0 || cfg_.queues > driver_.io_queue_count()) {
